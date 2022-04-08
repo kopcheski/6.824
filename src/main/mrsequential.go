@@ -6,13 +6,16 @@ package main
 // go run mrsequential.go wc.so pg*.txt
 //
 
-import "fmt"
-import "6.824/mr"
-import "plugin"
-import "os"
-import "log"
-import "io/ioutil"
-import "sort"
+import (
+	"fmt"
+	"io/ioutil"
+	"log"
+	"os"
+	"plugin"
+	"sort"
+
+	"6.824/mr"
+)
 
 // for sorting by key.
 type ByKey []mr.KeyValue
@@ -28,6 +31,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	// get map and reduce function
 	mapf, reducef := loadPlugin(os.Args[1])
 
 	//
@@ -35,7 +39,9 @@ func main() {
 	// pass it to Map,
 	// accumulate the intermediate Map output.
 	//
+	// [{apple 1}{orange 1}{apple 1}]
 	intermediate := []mr.KeyValue{}
+	// support multi files input
 	for _, filename := range os.Args[2:] {
 		file, err := os.Open(filename)
 		if err != nil {
@@ -68,19 +74,25 @@ func main() {
 	i := 0
 	for i < len(intermediate) {
 		j := i + 1
+		// check until where the key is the same !
 		for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
 			j++
 		}
 		values := []string{}
+		// add all these value with the same key to a same array.
 		for k := i; k < j; k++ {
 			values = append(values, intermediate[k].Value)
 		}
+		// call reduce function
 		output := reducef(intermediate[i].Key, values)
 
 		// this is the correct format for each line of Reduce output.
 		fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
 
+		// update i to skip this key!
 		i = j
+
+		// continue with next Key.
 	}
 
 	ofile.Close()
@@ -91,19 +103,25 @@ func main() {
 // from a plugin file, e.g. ../mrapps/wc.so
 //
 func loadPlugin(filename string) (func(string, string) []mr.KeyValue, func(string, []string) string) {
+	// plugin.Open to open map reduce file
 	p, err := plugin.Open(filename)
 	if err != nil {
 		log.Fatalf("cannot load plugin %v", filename)
 	}
+	// get Map function
 	xmapf, err := p.Lookup("Map")
 	if err != nil {
 		log.Fatalf("cannot find Map in %v", filename)
 	}
+	// combine the map function input and output
+	// func Map(filename string, contents string) []mr.KeyValue
 	mapf := xmapf.(func(string, string) []mr.KeyValue)
 	xreducef, err := p.Lookup("Reduce")
 	if err != nil {
 		log.Fatalf("cannot find Reduce in %v", filename)
 	}
+	// combine the reduce function
+	// func Reduce(key string, values []string) string
 	reducef := xreducef.(func(string, []string) string)
 
 	return mapf, reducef
