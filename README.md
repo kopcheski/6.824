@@ -9,3 +9,17 @@ Please use the command below if you want to clone the original code.
 ```shell
 $ git clone git://g.csail.mit.edu/6.824-golabs-2022 6.824
 ```
+
+# MapReduce(Done)
+
+In src/main directory, run the command below.
+
+```shell
+bash test-mr.sh
+```
+
+It will show **PASSED ALL TESTS**
+
+
+
+# 
