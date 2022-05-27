@@ -20,6 +20,13 @@ bash test-mr.sh
 
 It will show **PASSED ALL TESTS**
 
+# Raft
 
+## 2A (DONE)
 
-# 
+```shell
+go test -run 2A
+
+#PASS
+#ok      6.824/raft      16.257s
+```
