@@ -3,3 +3,4 @@ api.key
 .api.key.trimmed
 *-handin.tar.gz
 src/.DS_Store
+.DS_Store
