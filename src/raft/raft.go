@@ -88,7 +88,7 @@ func (rf *Raft) GetState() (int, bool) {
 	// Your code here (2A).
 	term = rf.currentTerm
 	isleader = (rf.roleStatus == 2)
-	rf.advancedLog("GetState", fmt.Sprintf(" Role status : %d", rf.roleStatus))
+	rf.advancedLog("GetState", fmt.Sprintf("Role status : %d", rf.roleStatus))
 
 	rf.mu.Unlock()
 	return term, isleader
@@ -392,7 +392,7 @@ func (rf *Raft) sendHeartbeat() {
 }
 
 func (rf *Raft) advancedLog(action string, info string) {
-	fmt.Printf("%s  %s:  Server: %d, curTerm: %d, %s. \n", time.Now().Format("2006-01-02 15:04:05.0000"), action, rf.me, rf.currentTerm, info)
+	fmt.Printf("%s\t%s\tServer: %d\t curTerm: %d\t%s\n", time.Now().Format("15:04:05.0000"), action, rf.me, rf.currentTerm, info)
 }
 
 func (rf *Raft) updateRandomElectionTimeoutSecond() {
