@@ -185,7 +185,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		// TODO: check here
 		reply.Term = args.Term
 		reply.VoteGranted = true
-		rf.advancedLog("RequestVote", "Vote for "+strconv.Itoa(rf.voteFor))
+		rf.advancedLog("ElectionVote", "Vote for "+strconv.Itoa(rf.voteFor))
 	} else {
 		reply.Term = args.Term
 		reply.VoteGranted = false
@@ -241,7 +241,7 @@ type AppendEntriesReply struct {
 // AppendEntries handler
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
-	rf.advancedLog("AppendEntries", fmt.Sprintf("Leader: %d, LeaderTerm: %d", args.LeaderId, args.Term))
+	rf.advancedLog("AppendEntries", fmt.Sprintf("Leader: %d\tLeaderTerm: %d", args.LeaderId, args.Term))
 
 	if args.Term >= rf.currentTerm {
 		rf.roleStatus = 0
@@ -325,7 +325,7 @@ func (rf *Raft) ticker() {
 			rf.voteFor = rf.me
 			rf.roleStatus = 1
 
-			rf.advancedLog("Leader Election", "become the candidate")
+			rf.advancedLog("ElectionStart", "become the candidate")
 
 			requestVoteArgs := RequestVoteArgs{}
 			requestVoteArgs.CandidateId = rf.me
@@ -351,7 +351,7 @@ func (rf *Raft) ticker() {
 							if rf.roleStatus != 2 && !haveBecomeLeader {
 								haveBecomeLeader = true
 								rf.roleStatus = 2
-								rf.advancedLog("Leader Election", fmt.Sprintf("become the leader. vote count: %d. peers count: %d", gotCount, len(rf.peers)))
+								rf.advancedLog("ElectionEnd", fmt.Sprintf("become the leader. vote count: %d. peers count: %d", gotCount, len(rf.peers)))
 							}
 						}
 					}
@@ -392,7 +392,7 @@ func (rf *Raft) sendHeartbeat() {
 }
 
 func (rf *Raft) advancedLog(action string, info string) {
-	fmt.Printf("%s\t%s\tServer: %d\t curTerm: %d\t%s\n", time.Now().Format("15:04:05.0000"), action, rf.me, rf.currentTerm, info)
+	fmt.Printf("%s\t%s\tServer: %d\t curTerm: %d\t%s\n", time.Now().Format("04:05.0000"), action, rf.me, rf.currentTerm, info)
 }
 
 func (rf *Raft) updateRandomElectionTimeoutSecond() {
