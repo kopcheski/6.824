@@ -53,6 +53,11 @@ type ApplyMsg struct {
 	SnapshotIndex int
 }
 
+type LogEntry struct {
+	command interface{}
+	term    int
+}
+
 //
 // A Go object implementing a single Raft peer.
 //
@@ -71,8 +76,9 @@ type Raft struct {
 	voteFor       int
 	roleStatus    int // 0: follower   1: candidate  2:leader
 	timeoutLastTS time.Time
-
+	log           []LogEntry
 	// Personal Setting
+	loggerLevel                   int // 0: debug  1: OK to log 2: should log
 	electionTimeoutSecond         float64
 	tickerSleepBaseTimeMillsecond int
 	heartbeatDurationMillSecond   int
@@ -88,7 +94,7 @@ func (rf *Raft) GetState() (int, bool) {
 	// Your code here (2A).
 	term = rf.currentTerm
 	isleader = (rf.roleStatus == 2)
-	rf.advancedLog("GetState", fmt.Sprintf("Role status : %d", rf.roleStatus))
+	rf.advancedLog("GetState", fmt.Sprintf("Role status : %d", rf.roleStatus), 0)
 
 	rf.mu.Unlock()
 	return term, isleader
@@ -185,7 +191,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 		// TODO: check here
 		reply.Term = args.Term
 		reply.VoteGranted = true
-		rf.advancedLog("ElectionVote", "Vote for "+strconv.Itoa(rf.voteFor))
+		rf.advancedLog("ElectionVote", "Vote for "+strconv.Itoa(rf.voteFor), 2)
 	} else {
 		reply.Term = args.Term
 		reply.VoteGranted = false
@@ -241,7 +247,7 @@ type AppendEntriesReply struct {
 // AppendEntries handler
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
-	rf.advancedLog("AppendEntries", fmt.Sprintf("Leader: %d\tLeaderTerm: %d", args.LeaderId, args.Term))
+	rf.advancedLog("AppendEntries", fmt.Sprintf("Leader: %d\tLeaderTerm: %d", args.LeaderId, args.Term), 0)
 
 	if args.Term >= rf.currentTerm {
 		rf.roleStatus = 0
@@ -282,6 +288,12 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	isLeader := true
 
 	// Your code here (2B).
+	rf.advancedLog("CommandComing", fmt.Sprintf("Command: %s", command), 0)
+	term = rf.currentTerm
+	isLeader = rf.roleStatus == 2
+	if !isLeader {
+		return index, term, isLeader
+	}
 
 	return index, term, isLeader
 }
@@ -325,7 +337,7 @@ func (rf *Raft) ticker() {
 			rf.voteFor = rf.me
 			rf.roleStatus = 1
 
-			rf.advancedLog("ElectionStart", "become the candidate")
+			rf.advancedLog("ElectionStart", "become the candidate", 2)
 
 			requestVoteArgs := RequestVoteArgs{}
 			requestVoteArgs.CandidateId = rf.me
@@ -351,7 +363,7 @@ func (rf *Raft) ticker() {
 							if rf.roleStatus != 2 && !haveBecomeLeader {
 								haveBecomeLeader = true
 								rf.roleStatus = 2
-								rf.advancedLog("ElectionEnd", fmt.Sprintf("become the leader. vote count: %d. peers count: %d", gotCount, len(rf.peers)))
+								rf.advancedLog("ElectionEnd", fmt.Sprintf("become the leader. vote count: %d. peers count: %d", gotCount, len(rf.peers)), 2)
 							}
 						}
 					}
@@ -391,7 +403,10 @@ func (rf *Raft) sendHeartbeat() {
 	}
 }
 
-func (rf *Raft) advancedLog(action string, info string) {
+func (rf *Raft) advancedLog(action string, info string, level int) {
+	if level < rf.loggerLevel {
+		return
+	}
 	fmt.Printf("%s\t%s\tServer: %d\t curTerm: %d\t%s\n", time.Now().Format("04:05.0000"), action, rf.me, rf.currentTerm, info)
 }
 
@@ -418,6 +433,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.me = me
 
 	// Your initialization code here (2A, 2B, 2C).
+	rf.loggerLevel = 1
 	rf.currentTerm = 0
 	rf.roleStatus = 0
 	rf.voteFor = -1
