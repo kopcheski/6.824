@@ -30,3 +30,14 @@ go test -run 2A
 #PASS
 #ok      6.824/raft      16.257s
 ```
+
+
+
+## 2B(DONE)
+
+```shell
+go test -run 2B > log.txt
+
+#PASS
+#ok  	6.824/raft	71.911s
+```
