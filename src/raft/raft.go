@@ -92,7 +92,6 @@ type Raft struct {
 	heartbeatDurationMillSecond    int
 	commitThreadIntervalMillsecond int
 	lastGetLockTS                  time.Time
-	leaderDuplicateCommandMap      map[interface{}]int
 }
 
 // return currentTerm and whether this server
@@ -359,16 +358,9 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	isLeader = rf.roleStatus == 2
 
 	if isLeader {
-		// duplicate handle
-		// idx, ok := rf.leaderDuplicateCommandMap[command]
-		// if ok {
-		// 	index = idx
-		// } else {
 		index = len(rf.log) + 1
 		rf.log = append(rf.log, LogEntry{command, term})
 		rf.matchIndex[rf.me] = len(rf.log)
-		rf.leaderDuplicateCommandMap[command] = index
-		// }
 	}
 
 	return index, term, isLeader
@@ -460,8 +452,6 @@ func (rf *Raft) ticker() {
 									rf.matchIndex[i] = 0
 									rf.nextIndex[i] = nextIdx
 								}
-
-								rf.leaderDuplicateCommandMap = map[interface{}]int{}
 							}
 						}
 					}
