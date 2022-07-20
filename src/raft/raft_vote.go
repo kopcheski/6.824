@@ -69,6 +69,8 @@ type RequestVoteReply struct {
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
+	rf.requireLock("RequestVote")
+	defer rf.releaseLock("RequestVote")
 	reply.Term = rf.currentTerm
 	if args.Term <= rf.currentTerm {
 		reply.VoteGranted = false
@@ -117,6 +119,7 @@ func (rf *Raft) ticker() {
 		// Your code here to check if a leader election should
 		// be started and to randomize sleeping time using
 		// time.Sleep().
+		rf.requireLock("ticker")
 		if rf.roleStatus != 2 && time.Since(rf.timeoutLastTS).Seconds() > float64(rf.electionTimeoutSecond) {
 			rf.updateRandomElectionTimeoutSecond()
 
@@ -148,10 +151,12 @@ func (rf *Raft) ticker() {
 				}
 
 				go func(idx int) {
+
 					requestVoteReply := RequestVoteReply{}
 
 					rf.sendRequestVote(idx, &requestVoteArgs, &requestVoteReply)
-
+					rf.requireLock("tickerInside")
+					defer rf.releaseLock("tickerInside")
 					if requestVoteReply.Term > rf.currentTerm {
 						rf.roleStatus = 0
 						return
@@ -181,6 +186,7 @@ func (rf *Raft) ticker() {
 				}(idx)
 			}
 		}
+		rf.releaseLock("ticker")
 		time.Sleep(time.Duration(rf.tickerSleepBaseTimeMillsecond) * time.Millisecond)
 	}
 }

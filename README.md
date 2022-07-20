@@ -25,7 +25,7 @@ It will show **PASSED ALL TESTS**
 ## 2A (DONE)
 
 ```shell
-go test -run 2A
+go test -run 2A --race
 
 #PASS
 #ok      6.824/raft      16.257s
@@ -36,7 +36,7 @@ go test -run 2A
 ## 2B(DONE)
 
 ```shell
-go test -run 2B > log.txt
+go test -run 2B --race > log.txt
 
 #PASS
 #ok  	6.824/raft	71.911s

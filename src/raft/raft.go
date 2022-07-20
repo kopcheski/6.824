@@ -106,14 +106,14 @@ func (rf *Raft) releaseLock(lock_name string) {
 // return currentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
-
+	rf.requireLock("GetState")
 	var term int
 	var isleader bool
 	// Your code here (2A).
 	term = rf.currentTerm
 	isleader = (rf.roleStatus == 2)
 	rf.advancedLog("GetState", fmt.Sprintf("Role status : %d", rf.roleStatus), 0)
-
+	rf.releaseLock("GetState")
 	return term, isleader
 }
 
@@ -203,12 +203,14 @@ func (rf *Raft) checkIfIdxTermEqual(idx int, term int) bool {
 
 // AppendEntries handler
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+	rf.requireLock("AppendEntries")
 	rf.advancedLog("AppendEntries", fmt.Sprintf("Leader: %d\tLeaderTerm: %d", args.LeaderId, args.Term), -1)
 	reply.Term = rf.currentTerm
 
 	if args.Term < rf.currentTerm {
 		reply.Success = false
 		reply.Reason = "Term fail"
+		rf.releaseLock("AppendEntries")
 		return
 	}
 
@@ -223,6 +225,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if !idxMatch {
 		reply.Success = false
 		reply.Reason = "last IDX & term doesn't match"
+		rf.releaseLock("AppendEntries")
 		return
 	}
 
@@ -234,6 +237,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	}
 
 	reply.Success = true
+	rf.releaseLock("AppendEntries")
 }
 
 // Send appendEntries/heartbeat to server
@@ -269,6 +273,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	isLeader := true
 
 	// Your code here (2B).
+	rf.requireLock("Start")
 	term = rf.currentTerm
 	isLeader = rf.roleStatus == 2
 
@@ -277,7 +282,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		rf.log = append(rf.log, LogEntry{command, term})
 		rf.matchIndex[rf.me] = len(rf.log)
 	}
-
+	rf.releaseLock("Start")
 	return index, term, isLeader
 }
 
@@ -310,6 +315,7 @@ func (rf *Raft) sendHeartBeatToFollowers() {
 			continue
 		}
 		go func(idx int) {
+			rf.requireLock("sendHeartBeatInside1")
 			appendEntriesArgs := AppendEntriesArgs{}
 			appendEntriesArgs.LeaderId = rf.me
 			appendEntriesArgs.Term = rf.currentTerm
@@ -327,7 +333,11 @@ func (rf *Raft) sendHeartBeatToFollowers() {
 				appendEntriesArgs.PrevLogTerm = rf.log[appendEntriesArgs.PrevLogIndex-1].Term
 			}
 			appendEntriesReply := AppendEntriesReply{}
+			rf.releaseLock("sendHeartBeatInside1")
+
 			rf.sendAppendEntries(idx, &appendEntriesArgs, &appendEntriesReply)
+
+			rf.requireLock("sendHeartBeatInside2")
 			if appendEntriesReply.Term > rf.currentTerm {
 				rf.roleStatus = 0
 			}
@@ -345,6 +355,7 @@ func (rf *Raft) sendHeartBeatToFollowers() {
 				rf.matchIndex[idx] = curLen
 				rf.nextIndex[idx] = curLen + 1
 			}
+			rf.releaseLock("sendHeartBeatInside2")
 		}(idx)
 	}
 }
@@ -364,20 +375,23 @@ func (rf *Raft) leaderCommitLogCheck() {
 
 func (rf *Raft) leaderSyncInfoCheck() {
 	for rf.killed() == false {
+		rf.requireLock("leaderSyncInfoCheck")
 		if rf.roleStatus == 2 {
 			rf.sendHeartBeatToFollowers()
 
 			rf.leaderCommitLogCheck()
 		}
-
+		rf.releaseLock("leaderSyncInfoCheck")
 		time.Sleep(time.Duration(rf.heartbeatDurationMillSecond) * time.Millisecond)
 	}
 }
 
 func (rf *Raft) checkIfNeedToApplyLogToMachine() {
+	rf.requireLock("checkIfNeedToApplyLogToMachine")
 	if rf.commitIndex > rf.lastApplied && len(rf.log) >= rf.lastApplied {
 		rf.sendOneLogToApply()
 	}
+	rf.releaseLock("checkIfNeedToApplyLogToMachine")
 }
 
 func (rf *Raft) commitLogToStateMachine() {
