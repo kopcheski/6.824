@@ -19,12 +19,14 @@ package raft
 
 import (
 	//	"bytes"
+
 	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	//	"6.824/labgob"
+
 	"6.824/labrpc"
 )
 
@@ -78,6 +80,7 @@ type Raft struct {
 	roleStatus    int // 0: follower   1: candidate  2:leader
 	timeoutLastTS time.Time
 	log           []LogEntry // the first index is 1
+	logLen        int
 	commitIndex   int
 	lastApplied   int
 	// Volatile state on leaders:
@@ -118,44 +121,6 @@ func (rf *Raft) GetState() (int, bool) {
 }
 
 //
-// save Raft's persistent state to stable storage,
-// where it can later be retrieved after a crash and restart.
-// see paper's Figure 2 for a description of what should be persistent.
-//
-func (rf *Raft) persist() {
-	// Your code here (2C).
-	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// data := w.Bytes()
-	// rf.persister.SaveRaftState(data)
-}
-
-//
-// restore previously persisted state.
-//
-func (rf *Raft) readPersist(data []byte) {
-	if data == nil || len(data) < 1 { // bootstrap without any state?
-		return
-	}
-	// Your code here (2C).
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
-}
-
-//
 // A service wants to switch to snapshot.  Only do so if Raft hasn't
 // have more recent info since it communicate the snapshot on applyCh.
 //
@@ -175,77 +140,6 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 
 }
 
-// AppendEntries
-type AppendEntriesArgs struct {
-	Term         int
-	LeaderId     int
-	PrevLogIndex int
-	PrevLogTerm  int
-	Entries      []LogEntry
-	LeaderCommit int
-}
-
-type AppendEntriesReply struct {
-	Term    int
-	Success bool
-	Reason  string
-}
-
-func (rf *Raft) checkIfIdxTermEqual(idx int, term int) bool {
-	if idx == 0 {
-		return true
-	}
-	if idx > len(rf.log) {
-		return false
-	}
-	return rf.log[idx-1].Term == term
-}
-
-// AppendEntries handler
-func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
-	rf.requireLock("AppendEntries")
-	rf.advancedLog("AppendEntries", fmt.Sprintf("Leader: %d\tLeaderTerm: %d", args.LeaderId, args.Term), -1)
-	reply.Term = rf.currentTerm
-
-	if args.Term < rf.currentTerm {
-		reply.Success = false
-		reply.Reason = "Term fail"
-		rf.releaseLock("AppendEntries")
-		return
-	}
-
-	rf.roleStatus = 0
-	rf.refreshElectionTimeStamp()
-	rf.currentTerm = args.Term
-
-	// check if match log first, if success, update commit!
-	idxMatch := rf.checkIfIdxTermEqual(args.PrevLogIndex, args.Term)
-
-	rf.advancedLog("MatchCheck", fmt.Sprintf("\ncurrentLog: %+v\n appendDetail:%+v\n result:%t", rf.log, args, idxMatch), 3)
-	if !idxMatch {
-		reply.Success = false
-		reply.Reason = "last IDX & term doesn't match"
-		rf.releaseLock("AppendEntries")
-		return
-	}
-
-	rf.log = rf.log[:args.PrevLogIndex]
-	rf.log = append(rf.log, args.Entries...)
-
-	if rf.commitIndex < args.LeaderCommit {
-		rf.commitIndex = args.LeaderCommit
-	}
-
-	reply.Success = true
-	rf.releaseLock("AppendEntries")
-}
-
-// Send appendEntries/heartbeat to server
-func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
-	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
-	return ok
-}
-
 //
 // the service using Raft (e.g. a k/v server) wants to start
 // agreement on the next command to be appended to Raft's log. if this
@@ -261,29 +155,10 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 // the leader.
 //
 func (rf *Raft) getLastLogIdxAndTerm() (int, int) {
-	if len(rf.log) == 0 {
+	if rf.logLen == 0 {
 		return 0, 0
 	}
-	return len(rf.log), rf.log[len(rf.log)-1].Term
-}
-
-func (rf *Raft) Start(command interface{}) (int, int, bool) {
-	index := -1
-	term := -1
-	isLeader := true
-
-	// Your code here (2B).
-	rf.requireLock("Start")
-	term = rf.currentTerm
-	isLeader = rf.roleStatus == 2
-
-	if isLeader {
-		index = len(rf.log) + 1
-		rf.log = append(rf.log, LogEntry{command, term})
-		rf.matchIndex[rf.me] = len(rf.log)
-	}
-	rf.releaseLock("Start")
-	return index, term, isLeader
+	return rf.logLen, rf.log[rf.logLen-1].Term
 }
 
 //
@@ -305,111 +180,6 @@ func (rf *Raft) Kill() {
 func (rf *Raft) killed() bool {
 	z := atomic.LoadInt32(&rf.dead)
 	return z == 1
-}
-
-func (rf *Raft) sendHeartBeatToFollowers() {
-	rf.refreshElectionTimeStamp()
-	curLen := len(rf.log)
-	for idx := range rf.peers {
-		if idx == rf.me {
-			continue
-		}
-		go func(idx int) {
-			rf.requireLock("sendHeartBeatInside1")
-			appendEntriesArgs := AppendEntriesArgs{}
-			appendEntriesArgs.LeaderId = rf.me
-			appendEntriesArgs.Term = rf.currentTerm
-			appendEntriesArgs.LeaderCommit = rf.commitIndex
-
-			if rf.nextIndex[idx] == len(rf.log)+1 {
-				appendEntriesArgs.Entries = []LogEntry{}
-			} else {
-				appendEntriesArgs.Entries = rf.log[rf.nextIndex[idx]-1:]
-			}
-			appendEntriesArgs.PrevLogIndex = rf.nextIndex[idx] - 1
-			if appendEntriesArgs.PrevLogIndex == 0 {
-				appendEntriesArgs.PrevLogTerm = 0
-			} else {
-				appendEntriesArgs.PrevLogTerm = rf.log[appendEntriesArgs.PrevLogIndex-1].Term
-			}
-			appendEntriesReply := AppendEntriesReply{}
-			rf.releaseLock("sendHeartBeatInside1")
-
-			rf.sendAppendEntries(idx, &appendEntriesArgs, &appendEntriesReply)
-
-			rf.requireLock("sendHeartBeatInside2")
-			if appendEntriesReply.Term > rf.currentTerm {
-				rf.roleStatus = 0
-			}
-			if appendEntriesReply.Success == false {
-				/**
-				Important optimize!
-				Otherwise you would meet TestBackup2B: cannot reach agreement!
-				It is because of the complexity!
-				**/
-				failPreTerm := appendEntriesArgs.PrevLogTerm
-				for rf.nextIndex[idx] > 1 && rf.log[rf.nextIndex[idx]-2].Term == failPreTerm {
-					rf.nextIndex[idx]--
-				}
-			} else {
-				rf.matchIndex[idx] = curLen
-				rf.nextIndex[idx] = curLen + 1
-			}
-			rf.releaseLock("sendHeartBeatInside2")
-		}(idx)
-	}
-}
-
-func (rf *Raft) leaderCommitLogCheck() {
-	peerCount := len(rf.matchIndex)
-	nextIdxCommitCount := 0
-	for i := 0; i < len(rf.matchIndex); i++ {
-		if rf.matchIndex[i] > rf.commitIndex {
-			nextIdxCommitCount++
-		}
-	}
-	if nextIdxCommitCount > peerCount/2 {
-		rf.commitIndex++
-	}
-}
-
-func (rf *Raft) leaderSyncInfoCheck() {
-	for rf.killed() == false {
-		rf.requireLock("leaderSyncInfoCheck")
-		if rf.roleStatus == 2 {
-			rf.sendHeartBeatToFollowers()
-
-			rf.leaderCommitLogCheck()
-		}
-		rf.releaseLock("leaderSyncInfoCheck")
-		time.Sleep(time.Duration(rf.heartbeatDurationMillSecond) * time.Millisecond)
-	}
-}
-
-func (rf *Raft) checkIfNeedToApplyLogToMachine() {
-	rf.requireLock("checkIfNeedToApplyLogToMachine")
-	if rf.commitIndex > rf.lastApplied && len(rf.log) >= rf.lastApplied {
-		rf.sendOneLogToApply()
-	}
-	rf.releaseLock("checkIfNeedToApplyLogToMachine")
-}
-
-func (rf *Raft) commitLogToStateMachine() {
-	for rf.killed() == false {
-		rf.checkIfNeedToApplyLogToMachine()
-		time.Sleep(time.Duration(rf.commitThreadIntervalMillsecond) * time.Millisecond)
-	}
-}
-
-func (rf *Raft) sendOneLogToApply() {
-	msg := ApplyMsg{}
-	msg.Command = rf.log[rf.lastApplied].Command
-	msg.CommandIndex = rf.lastApplied + 1
-	msg.CommandValid = true
-	rf.applyCh <- msg
-	rf.advancedLog("WantToLogApply", fmt.Sprintf("Log len %d,LastApp %d ,ApplyMsg: %+v. ", len(rf.log), rf.lastApplied, msg), 4)
-	rf.lastApplied++
-	rf.advancedLog("LogApply", fmt.Sprintf("ApplyMsg: %+v. ", msg), 0)
 }
 
 func (rf *Raft) advancedLog(action string, info string, level int) {
@@ -447,9 +217,9 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.updateRandomElectionTimeoutSecond()
 
 	rf.tickerSleepBaseTimeMillsecond = 10
-	rf.heartbeatDurationMillSecond = 100
+	rf.heartbeatDurationMillSecond = 20
 
-	rf.commitThreadIntervalMillsecond = 100
+	rf.commitThreadIntervalMillsecond = 10
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())

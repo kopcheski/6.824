@@ -105,7 +105,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 }
 
 func (rf *Raft) updateRandomElectionTimeoutSecond() {
-	rf.electionTimeoutSecond = 0.25 + float64(rand.Intn(1500))/1000
+	rf.electionTimeoutSecond = 0.15 + float64(rand.Intn(1500))/1000
 }
 
 func (rf *Raft) refreshElectionTimeStamp() {
@@ -134,7 +134,7 @@ func (rf *Raft) ticker() {
 			requestVoteArgs := RequestVoteArgs{}
 			requestVoteArgs.CandidateId = rf.me
 			requestVoteArgs.Term = rf.currentTerm
-			requestVoteArgs.LastLogIndex = len(rf.log)
+			requestVoteArgs.LastLogIndex = rf.logLen
 			if requestVoteArgs.LastLogIndex == 0 {
 				requestVoteArgs.LastLogTerm = 0
 			} else {
@@ -175,7 +175,7 @@ func (rf *Raft) ticker() {
 								// reinit_client_index
 								rf.matchIndex = make([]int, len(rf.peers))
 								rf.nextIndex = make([]int, len(rf.peers))
-								nextIdx := len(rf.log) + 1
+								nextIdx := rf.logLen + 1
 								for i := 0; i < len(rf.peers); i++ {
 									rf.matchIndex[i] = 0
 									rf.nextIndex[i] = nextIdx

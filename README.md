@@ -31,13 +31,30 @@ go test -run 2A --race
 #ok      6.824/raft      16.257s
 ```
 
-
-
 ## 2B(DONE)
 
 ```shell
 go test -run 2B --race > log.txt
 
 #PASS
-#ok  	6.824/raft	71.911s
+#ok      6.824/raft    71.911s
 ```
+
+## 2C(Pass with issue)
+
+```go
+rf.heartbeatDurationMillSecond = 20
+```
+
+```shell
+go test -run 2C --race > log.txt
+
+#PASS
+#ok  	6.824/raft	142.222s
+```
+
+In the requirement, it asks us to set the heartbeat inteval to 100 ms. 
+
+However, current implementation can only pass when set it below 25 ms.
+
+Please feel free to change the code and I would appreciate it if you can commit the better version : -) .
