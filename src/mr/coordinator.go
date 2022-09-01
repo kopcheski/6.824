@@ -1,15 +1,21 @@
 package mr
 
-import "log"
-import "net"
-import "os"
-import "net/rpc"
-import "net/http"
+import (
+	"fmt"
+	"log"
+	"net"
+	"net/http"
+	"net/rpc"
+	"os"
+	"time"
+)
 
+const timeout = time.Duration(10) * time.Second
+
+var filesList []string
+var assignedTasks map[string]time.Time
 
 type Coordinator struct {
-	// Your definitions here.
-
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -19,11 +25,37 @@ type Coordinator struct {
 //
 // the RPC argument and reply types are defined in rpc.go.
 //
-func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
-	reply.Y = args.X + 1
+func (c *Coordinator) Example(args *ExampleArgs, reply *FileNameReply) error {
+
+	reply.fileName = assignTask()
+
+	// TODO
+	// receive request;
+	// first file from list
+	// empty?
+	//   find older than 10s in the map
+	//   empty?
+	//      work is over
+	//   reasign current time to map's value
+	// add to the map with current timestamp
+
 	return nil
 }
 
+func assignTask() string {
+
+	var fileName string
+
+	if len(filesList) == 0 {
+		fmt.Println("All files were served!")
+		return ""
+	}
+
+	fileName = filesList[0]
+	filesList = filesList[1:]
+
+	return fileName
+}
 
 //
 // start a thread that listens for RPCs from worker.go
@@ -50,7 +82,6 @@ func (c *Coordinator) Done() bool {
 
 	// Your code here.
 
-
 	return ret
 }
 
@@ -62,8 +93,7 @@ func (c *Coordinator) Done() bool {
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{}
 
-	// Your code here.
-
+	filesList = files
 
 	c.server()
 	return &c
