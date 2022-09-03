@@ -20,9 +20,9 @@ const (
 	Processed
 )
 
-var filesList []string
+var tasksQueue []string
 
-var assignedTasks = make(map[string]TaskStatus)
+var assignedTaskStatus = make(map[string]TaskStatus)
 
 type Coordinator struct {
 }
@@ -36,28 +36,14 @@ func (c *Coordinator) Example(args *WorkerArgs, reply *FileNameReply) error {
 
 	reply.taskFileName = assignTask(WorkerArgs{args.workerName, args.processedFileName})
 
-	// TODO
-	// receive request;
-	// first file from list
-	// empty?
-	//   find older than 10s in the map
-	//   empty?
-	//      work is over
-	//   reasign current time to map's value
-	// add to the map with current timestamp
-
 	return nil
 }
 
 func assignTask(args WorkerArgs) string {
-	fmt.Print("\n\nAvailable tasks: ")
-	fmt.Println(filesList)
-	fmt.Print("Assigned tasks: ")
-	fmt.Println(assignedTasks)
 	if args.processedFileName != "" { // to remove already processed tasks from queue
-		if assignedTasks[args.processedFileName] == Processing {
-			assignedTasks[args.processedFileName] = Processed // non-thread safe with go func
-			removeFromArray(filesList, args.processedFileName)
+		if assignedTaskStatus[args.processedFileName] == Processing {
+			assignedTaskStatus[args.processedFileName] = Processed // non-thread safe with go func
+			removeFromArray(tasksQueue, args.processedFileName)
 			fmt.Printf("%q finalized processing %q. Removing task from queue.\n",
 				args.workerName, args.processedFileName)
 		} else {
@@ -66,23 +52,21 @@ func assignTask(args WorkerArgs) string {
 		}
 	}
 
-	var fileName string
-
-	if len(filesList) == 0 {
+	if len(tasksQueue) == 0 {
 		fmt.Println("No more files to assign.")
 		return ""
 	}
 
-	fileName = filesList[0]
-	filesList = filesList[1:]
-	assignedTasks[fileName] = Processing
+	var fileName = tasksQueue[0]
+	tasksQueue = tasksQueue[1:]
+	assignedTaskStatus[fileName] = Processing
 
 	fmt.Print("Scheduled at: ")
 	fmt.Println(time.Now())
 	go func() {
-		if assignedTasks[fileName] == Processing { // function to verify timed out tasks
-			assignedTasks[fileName] = TimedOut
-			filesList = append(filesList, fileName)
+		if assignedTaskStatus[fileName] == Processing { // function to verify timed out tasks
+			assignedTaskStatus[fileName] = TimedOut
+			tasksQueue = append(tasksQueue, fileName)
 			fmt.Printf("The completion of %q task has just timed out. It is back to the queue.\n", fileName)
 
 			fmt.Print("Executed at: ")
@@ -134,7 +118,7 @@ func (c *Coordinator) Done() bool {
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{}
 
-	filesList = files
+	tasksQueue = files
 
 	c.server()
 	return &c

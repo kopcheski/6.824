@@ -3,6 +3,7 @@ package mr
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -10,7 +11,7 @@ import (
 func TestEmptyFileList(t *testing.T) {
 	var files []string
 
-	filesList = files
+	tasksQueue = files
 
 	var worker = WorkerArgs{"Worker-1", ""}
 	var fileName = assignTask(worker)
@@ -23,7 +24,7 @@ func TestEmptyFileList(t *testing.T) {
 func TestAssignTheFirstFile(t *testing.T) {
 	var files = [2]string{"pg-being_ernest.txt", "pg-dorian_grey.txt"}
 
-	filesList = files[0:2]
+	tasksQueue = files[0:2]
 
 	var worker = WorkerArgs{"Worker-1", ""}
 	var fileName = assignTask(worker)
@@ -36,7 +37,7 @@ func TestAssignTheFirstFile(t *testing.T) {
 func TestAssignAllFilesUntilThereAreNoMoreFilesLeft(t *testing.T) {
 	var files = [2]string{"pg-being_ernest.txt", "pg-dorian_grey.txt"}
 
-	filesList = files[0:2]
+	tasksQueue = files[0:2]
 
 	var fileName1 = assignTask(WorkerArgs{"Worker-1", ""})
 	var fileName2 = assignTask(WorkerArgs{"Worker-2", ""})
@@ -45,4 +46,16 @@ func TestAssignAllFilesUntilThereAreNoMoreFilesLeft(t *testing.T) {
 	assert.Equal(t, "pg-being_ernest.txt", fileName1)
 	assert.Equal(t, "pg-dorian_grey.txt", fileName2)
 	assert.Empty(t, fileName3)
+}
+
+func TestTaskGoesBackToQueueWhenExecutionTimesOut(t *testing.T) {
+	var files = [2]string{"pg-being_ernest.txt", "pg-dorian_grey.txt"}
+
+	tasksQueue = files[0:2]
+
+	var fileName = assignTask(WorkerArgs{"Worker-1", ""})
+	time.Sleep(timeout + (1 + time.Second))
+
+	assert.Equal(t, assignedTaskStatus[fileName], TimedOut)
+	assert.ElementsMatch(t, files, tasksQueue)
 }
