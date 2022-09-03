@@ -12,9 +12,17 @@ import (
 
 const timeout = time.Duration(10) * time.Second
 
+type TaskStatus int
+
+const (
+	Processing TaskStatus = iota
+	TimedOut
+	Processed
+)
+
 var filesList []string
 
-var assignedTasks = make(map[string]time.Time)
+var assignedTasks = make(map[string]TaskStatus)
 
 type Coordinator struct {
 }
@@ -46,11 +54,15 @@ func assignTask(args WorkerArgs) string {
 	fmt.Println(filesList)
 	fmt.Print("Assigned tasks: ")
 	fmt.Println(assignedTasks)
-	if args.processedFileName != "" {
-		if _, ok := assignedTasks[args.processedFileName]; ok {
-			delete(assignedTasks, args.processedFileName) // non-thread safe with go func
+	if args.processedFileName != "" { // to remove already processed tasks from queue
+		if assignedTasks[args.processedFileName] == Processing {
+			assignedTasks[args.processedFileName] = Processed // non-thread safe with go func
 			removeFromArray(filesList, args.processedFileName)
-			fmt.Printf("%q finalized processing %q. Removing task from queue.\n", args.workerName, args.processedFileName)
+			fmt.Printf("%q finalized processing %q. Removing task from queue.\n",
+				args.workerName, args.processedFileName)
+		} else {
+			fmt.Printf("%q has already timed out to process task %q. Another one should be assigned to it now.\n",
+				args.workerName, args.processedFileName)
 		}
 	}
 
@@ -63,14 +75,19 @@ func assignTask(args WorkerArgs) string {
 
 	fileName = filesList[0]
 	filesList = filesList[1:]
-	assignedTasks[fileName] = time.Now()
+	assignedTasks[fileName] = Processing
 
+	fmt.Print("Scheduled at: ")
+	fmt.Println(time.Now())
 	go func() {
-		if _, ok := assignedTasks[fileName]; ok {
-			delete(assignedTasks, fileName)
+		if assignedTasks[fileName] == Processing { // function to verify timed out tasks
+			assignedTasks[fileName] = TimedOut
 			filesList = append(filesList, fileName)
 			fmt.Printf("The completion of %q task has just timed out. It is back to the queue.\n", fileName)
-			time.Sleep(10 * time.Second)
+
+			fmt.Print("Executed at: ")
+			fmt.Println(time.Now())
+			time.Sleep(timeout) // TODO should be in or out of the condition?
 		}
 	}()
 
