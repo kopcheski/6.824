@@ -66,6 +66,7 @@ func Map(fileName string, mapf func(string, string) []KeyValue) {
 
 	for key, element := range kva {
 		var nReduce = ihash(string(key)) % nReduceTasks
+		// TODO copy from the mrsequential.go
 	}
 
 	// A reasonable naming convention for intermediate files is mr-X-Y,
