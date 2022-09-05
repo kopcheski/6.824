@@ -59,3 +59,17 @@ func TestTaskGoesBackToQueueWhenExecutionTimesOut(t *testing.T) {
 	assert.Equal(t, assignedTaskStatus[fileName], TimedOut)
 	assert.ElementsMatch(t, files, tasksQueue)
 }
+
+func TestCoordinatorIsDoneWhenThereAreNoMoreTasksToProcess(t *testing.T) {
+	var files = [1]string{"pg-being_ernest.txt"}
+
+	tasksQueue = files[0:1]
+
+	var c = Coordinator{}
+	assert.False(t, c.Done())
+
+	var worker = WorkerArgs{"Worker-1", ""}
+	assignTask(worker)
+
+	assert.True(t, c.Done())
+}

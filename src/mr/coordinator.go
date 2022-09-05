@@ -40,6 +40,9 @@ func (c *Coordinator) Example(args *WorkerArgs, reply *FileNameReply) error {
 }
 
 func assignTask(args WorkerArgs) string {
+
+	// TODO I will also need to handle the intermediate files. :)
+
 	if args.processedFileName != "" { // to remove already processed tasks from queue
 		if assignedTaskStatus[args.processedFileName] == Processing {
 			assignedTaskStatus[args.processedFileName] = Processed // non-thread safe with go func
@@ -105,11 +108,7 @@ func (c *Coordinator) server() {
 // main/mrcoordinator.go calls Done() periodically to find out
 // if the entire job has finished.
 func (c *Coordinator) Done() bool {
-	ret := false
-
-	// Your code here.
-
-	return ret
+	return len(tasksQueue) == 0
 }
 
 // create a Coordinator.
