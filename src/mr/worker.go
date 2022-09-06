@@ -7,7 +7,16 @@ import (
 	"log"
 	"net/rpc"
 	"os"
+	"sort"
 )
+
+// for sorting by key.
+type ByKey []KeyValue
+
+// for sorting by key.
+func (a ByKey) Len() int           { return len(a) }
+func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 
 // Map functions return a slice of KeyValue.
 type KeyValue struct {
@@ -53,6 +62,50 @@ func Map(fileName string, mapf func(string, string) []KeyValue) {
 		return
 	}
 
+	content := readFileToString(fileName)
+
+	kva := mapf(fileName, content)
+
+	intermediateMap := splitIntoBuckets(kva)
+
+	sortMap(intermediateMap)
+
+	var fileNamePrefix = "mr-" + fileName
+	writeToFiles(intermediateMap, fileNamePrefix)
+}
+
+func writeToFiles(intermediateMap map[int][]KeyValue, fileNamePrefix string) {
+	for key, element := range intermediateMap {
+
+		oname := fileNamePrefix + fmt.Sprint(key)
+		ofile, _ := os.Create(oname)
+
+		for _, s := range element {
+			fmt.Fprintf(ofile, "%v\n", s)
+		}
+
+		ofile.Close()
+	}
+
+}
+
+func sortMap(intermediateMap map[int][]KeyValue) {
+	for _, element := range intermediateMap {
+		sort.Sort(ByKey(element))
+	}
+}
+
+func splitIntoBuckets(kva []KeyValue) map[int][]KeyValue {
+	var intermediateMap = make(map[int][]KeyValue)
+
+	for key, element := range kva {
+		var nReduce = ihash(fmt.Sprint(key)) % nReduceTasks
+		intermediateMap[nReduce] = append(intermediateMap[nReduce], element)
+	}
+	return intermediateMap
+}
+
+func readFileToString(fileName string) string {
 	file, err := os.Open(fileName)
 	if err != nil {
 		log.Fatalf("cannot open %v", fileName)
@@ -62,16 +115,7 @@ func Map(fileName string, mapf func(string, string) []KeyValue) {
 		log.Fatalf("cannot read %v", fileName)
 	}
 	file.Close()
-	kva := mapf(fileName, string(content))
-
-	for key, element := range kva {
-		var nReduce = ihash(string(key)) % nReduceTasks
-		// TODO copy from the mrsequential.go
-	}
-
-	// A reasonable naming convention for intermediate files is mr-X-Y,
-	// where X is the Map task number, and Y is the reduce task number.
-
+	return string(content)
 }
 
 // example function to show how to make an RPC call to the coordinator.
