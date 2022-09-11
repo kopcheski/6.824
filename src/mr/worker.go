@@ -1,6 +1,7 @@
 package mr
 
 import (
+	"bufio"
 	"fmt"
 	"hash/fnv"
 	"io/ioutil"
@@ -8,7 +9,10 @@ import (
 	"net/rpc"
 	"os"
 	"sort"
+	"strings"
 )
+
+var intermediateFileNamePrefix = "mr-"
 
 // for sorting by key.
 type ByKey []KeyValue
@@ -36,28 +40,57 @@ func ihash(key string) int {
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
-	// it gets two functions, the map and the reduce.
-	// how to decide which one to call?
-	// -> it depends on the coordinator response.
-	// -> if beginsWith pg*, map. otherwise, reduce.
 	// coord still does not know how to handle files create by the map function. How to inform it?
-	// via the request? Looks more efficient than polling the filesystem
-	// BUT, the coord will _have_ to poll the FS, as stated by the rules.
+	// the coord will _have_ to poll the FS, as stated by the rules.
 
 	var reply = RequestTask()
 
-	Map(reply, mapf)
-	// MAP impl:
-	// read the content of the file and send it as the 2nd arg, 1st must be ignored.
-	// it will return a KV pair
-	// write it to a file
-	// add it to the response.
-
-	// REDUCE impl:
+	if strings.HasPrefix(reply, intermediateFileNamePrefix) {
+		reduceKeyValue(reply, reducef)
+	} else if strings.HasPrefix(reply, "pg-") {
+		mapTextToKeyValue(reply, mapf)
+	} else {
+		log.Panicf("no appropiate function for file %q.", reply)
+	}
 
 }
 
-func Map(fileName string, mapf func(string, string) []KeyValue) {
+func reduceKeyValue(fileName string, reducef func(string, []string) string) {
+	if len(fileName) == 0 {
+		return
+	}
+
+	content, err := readLines(fileName)
+	if err != nil {
+		log.Panicf("error reading file %q.\n%q", fileName, err)
+	}
+
+	reduced := reducef(fileName, content)
+	log.Printf("%q was reduced to %q", content, reduced)
+
+	// REDUCE impl:
+	// [ ] write output to mr-out-X
+	// [ ] one line per return of the reducef call
+	// [ ] line should be formatted as "%v %v", key and value respectively
+
+}
+
+func readLines(path string) ([]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var lines []string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+	return lines, scanner.Err()
+}
+
+func mapTextToKeyValue(fileName string, mapf func(string, string) []KeyValue) {
 	if len(fileName) == 0 {
 		return
 	}
