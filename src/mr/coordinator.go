@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/rpc"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -20,15 +22,15 @@ const (
 	Processed
 )
 
-var mapTasksQueue []string
-
-var reduceTasksQueue []string
+var tasksQueue []string
 
 var reduceTasksStarted = false
 
 var assignedTaskStatus = make(map[string]TaskStatus)
 
 var nReduceTasks int
+
+var done = false
 
 type Coordinator struct {
 }
@@ -50,43 +52,80 @@ func assignTask(args WorkerArgs) string {
 	// TODO I will also need to handle the intermediate files. :)
 	// poll FS for finished tasks (map&reduce)
 
-	if args.processedFileName != "" { // to remove already processed tasks from queue
-		if assignedTaskStatus[args.processedFileName] == Processing {
-			assignedTaskStatus[args.processedFileName] = Processed // non-thread safe with go func
-			removeFromArray(mapTasksQueue, args.processedFileName)
-			fmt.Printf("%q finalized processing %q. Removing task from queue.\n",
-				args.workerName, args.processedFileName)
-		} else {
-			fmt.Printf("%q has already timed out to process task %q. Another one should be assigned to it now.\n",
-				args.workerName, args.processedFileName)
-		}
+	// to remove already processed tasks from queue
+	// non-thread safe with go func
+	removeProcessedTasksFromQueue()
+
+	allMapTasksProcessed := len(tasksQueue) == 0 && !reduceTasksStarted
+	if allMapTasksProcessed {
+		tasksQueue = findIntermediateFiles()
+		reduceTasksStarted = true
+		log.Println("All map tasks are finished.")
+		log.Println("Starting up reduce tasks.")
 	}
 
-	if len(mapTasksQueue) == 0 {
-		fmt.Println("No more files to assign.")
-		return ""
+	if len(tasksQueue) > 0 {
+		return nextAvailableTask(args)
 	}
 
-	var fileName = mapTasksQueue[0]
-	mapTasksQueue = mapTasksQueue[1:]
+	fmt.Println("No more files to assign.")
+	done = true
+	return ""
+}
+
+func nextAvailableTask(args WorkerArgs) string {
+	var fileName = tasksQueue[0]
+	tasksQueue = tasksQueue[1:]
 	assignedTaskStatus[fileName] = Processing
 
-	fmt.Print("Scheduled at: ")
-	fmt.Println(time.Now())
 	go func() {
-		if assignedTaskStatus[fileName] == Processing { // function to verify timed out tasks
+		time.Sleep(timeout)
+		// function to verify timed out tasks
+		if assignedTaskStatus[fileName] == Processing {
 			assignedTaskStatus[fileName] = TimedOut
-			mapTasksQueue = append(mapTasksQueue, fileName)
+			tasksQueue = append(tasksQueue, fileName)
 			fmt.Printf("The completion of %q task has just timed out. It is back to the queue.\n", fileName)
-
-			fmt.Print("Executed at: ")
-			fmt.Println(time.Now())
-			time.Sleep(timeout) // TODO should be in or out of the condition?
 		}
 	}()
 
 	fmt.Printf("%q will be assigned to worker %q.\n", fileName, args.workerName)
 	return fileName
+}
+
+func removeProcessedTasksFromQueue() {
+	var processedTasks = findIntermediateFiles()
+	if len(processedTasks) == 0 {
+		return
+	}
+	var normalizedTaskNames = removeMapOutputPrefix(processedTasks)
+	for _, processedFileName := range normalizedTaskNames {
+		if assignedTaskStatus[processedFileName] == Processing {
+			assignedTaskStatus[processedFileName] = Processed
+			removeFromArray(tasksQueue, processedFileName)
+			fmt.Printf("Removing task \"%q\" from queue.\n", processedFileName)
+		}
+		// else {
+		// 	fmt.Printf("%q has already timed out to process task %q. Another one should be assigned to it now.\n",
+		// 		args.workerName, args.processedFileName)
+		// }
+	}
+}
+
+func removeMapOutputPrefix(processedTasks []string) []string {
+	var normalizedTaskNames = make([]string, len(processedTasks))
+	for i, v := range processedTasks {
+		var _, after, _ = strings.Cut(v, "mr-")
+		normalizedTaskNames[i] = after
+	}
+	return normalizedTaskNames
+}
+
+func findIntermediateFiles() []string {
+	files, err := filepath.Glob("mr-*")
+	if err != nil {
+		panic(err)
+	}
+	return files
 }
 
 func removeFromArray(s []string, r string) []string {
@@ -115,7 +154,7 @@ func (c *Coordinator) server() {
 // main/mrcoordinator.go calls Done() periodically to find out
 // if the entire job has finished.
 func (c *Coordinator) Done() bool {
-	return reduceTasksStarted && len(reduceTasksQueue) == 0
+	return done
 }
 
 // create a Coordinator.
@@ -124,7 +163,7 @@ func (c *Coordinator) Done() bool {
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{}
 
-	mapTasksQueue = files
+	tasksQueue = files
 	nReduceTasks = nReduce
 
 	c.server()
