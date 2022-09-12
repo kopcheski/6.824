@@ -45,7 +45,7 @@ func TestSortMap(t *testing.T) {
 }
 
 func TestWriteMapToFiles(t *testing.T) {
-	var fileNamePrefix = "mr-"
+	var fileNamePrefix = intermediateFileNamePrefix
 	deleteFilesStartingWith(fileNamePrefix)
 
 	var intermediate [3]KeyValue

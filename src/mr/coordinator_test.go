@@ -36,16 +36,16 @@ func TestAssignTheFirstFile(t *testing.T) {
 }
 
 func TestAssignAllFilesUntilThereAreNoMoreFilesLeft(t *testing.T) {
-	deleteFilesStartingWith("mr-")
-	defer deleteFilesStartingWith("mr-")
+	deleteFilesStartingWith(intermediateFileNamePrefix)
+	defer deleteFilesStartingWith(intermediateFileNamePrefix)
 
 	var files = [2]string{"pg-being_ernest.txt", "pg-dorian_grey.txt"}
 	tasksQueue = files[0:2]
 
 	var fileName1 = assignTask(WorkerArgs{"Worker-1", ""})
-	createFile("mr-" + files[0])
+	createFile(intermediateFileNamePrefix + files[0])
 	var fileName2 = assignTask(WorkerArgs{"Worker-2", ""})
-	createFile("mr-" + files[1])
+	createFile(intermediateFileNamePrefix + files[1])
 	// starts assign reduce tasks
 	var fileName3 = assignTask(WorkerArgs{"Worker-1", ""})
 	var fileName4 = assignTask(WorkerArgs{"Worker-1", ""})

@@ -114,7 +114,7 @@ func removeProcessedTasksFromQueue() {
 func removeMapOutputPrefix(processedTasks []string) []string {
 	var normalizedTaskNames = make([]string, len(processedTasks))
 	for i, v := range processedTasks {
-		var _, after, _ = strings.Cut(v, "mr-")
+		var _, after, _ = strings.Cut(v, intermediateFileNamePrefix)
 		normalizedTaskNames[i] = after
 	}
 	return normalizedTaskNames

@@ -103,7 +103,7 @@ func mapTextToKeyValue(fileName string, mapf func(string, string) []KeyValue) {
 
 	sortMap(intermediateMap)
 
-	var fileNamePrefix = "mr-" + fileName
+	var fileNamePrefix = intermediateFileNamePrefix + fileName
 	writeToFiles(intermediateMap, fileNamePrefix)
 }
 
