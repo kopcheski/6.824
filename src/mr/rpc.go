@@ -24,8 +24,9 @@ type ExampleReply struct {
 	Y int
 }
 
-type FileNameReply struct {
-	taskFileName string
+type CoordinatorReply struct {
+	TaskFileName string
+	NReduceTasks int
 }
 
 type WorkerArgs struct {

@@ -14,6 +14,8 @@ import (
 
 var intermediateFileNamePrefix = "mr-"
 
+var nReduce int
+
 // for sorting by key.
 type ByKey []KeyValue
 
@@ -100,14 +102,15 @@ func mapTextToKeyValue(fileName string, mapf func(string, string) []KeyValue) {
 
 	sortMap(intermediateMap)
 
-	var fileNamePrefix = intermediateFileNamePrefix + fileName
+	var b, _, _ = strings.Cut(fileName, ".txt")
+	var fileNamePrefix = intermediateFileNamePrefix + b
 	writeToFiles(intermediateMap, fileNamePrefix)
 }
 
 func writeToFiles(intermediateMap map[int][]KeyValue, fileNamePrefix string) {
 	for key, element := range intermediateMap {
 
-		oname := fileNamePrefix + fmt.Sprint(key)
+		oname := fileNamePrefix + "-" + fmt.Sprint(key) + ".txt"
 		ofile, _ := os.Create(oname)
 
 		for _, s := range element {
@@ -129,8 +132,8 @@ func splitIntoBuckets(kva []KeyValue) map[int][]KeyValue {
 	var intermediateMap = make(map[int][]KeyValue)
 
 	for key, element := range kva {
-		var nReduce = ihash(fmt.Sprint(key)) % nReduceTasks
-		intermediateMap[nReduce] = append(intermediateMap[nReduce], element)
+		var nReduceKey = ihash(fmt.Sprint(key)) % nReduce
+		intermediateMap[nReduceKey] = append(intermediateMap[nReduceKey], element)
 	}
 	return intermediateMap
 }
@@ -157,18 +160,18 @@ func RequestTask() string {
 	args := WorkerArgs{}
 
 	// declare a reply structure.
-	reply := FileNameReply{}
-
+	reply := CoordinatorReply{}
 	// send the RPC request, wait for the reply.
 	// the "Coordinator.Example" tells the
 	// receiving server that we'd like to call
 	// the Example() method of struct Coordinator.
 	ok := call("Coordinator.Example", &args, &reply)
 	if ok {
-		fmt.Printf("Got task %v to process.\n", reply.taskFileName)
-		return reply.taskFileName
+		nReduce = reply.NReduceTasks
+		log.Printf("Got task %v to process.\n", reply.TaskFileName)
+		return reply.TaskFileName
 	} else {
-		fmt.Printf("call failed!\n")
+		log.Printf("call failed!\n")
 		return ""
 	}
 
@@ -191,6 +194,6 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 		return true
 	}
 
-	fmt.Println(err)
+	log.Println(err)
 	return false
 }

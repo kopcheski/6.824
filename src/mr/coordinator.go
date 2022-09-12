@@ -1,7 +1,6 @@
 package mr
 
 import (
-	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -40,9 +39,10 @@ type Coordinator struct {
 // an example RPC handler.
 //
 // the RPC argument and reply types are defined in rpc.go.
-func (c *Coordinator) Example(args *WorkerArgs, reply *FileNameReply) error {
+func (c *Coordinator) Example(args *WorkerArgs, reply *CoordinatorReply) error {
 
-	reply.taskFileName = assignTask(WorkerArgs{})
+	reply.TaskFileName = assignTask(WorkerArgs{})
+	reply.NReduceTasks = nReduceTasks
 
 	return nil
 }
@@ -63,7 +63,7 @@ func assignTask(args WorkerArgs) string {
 		return nextAvailableTask(args)
 	}
 
-	fmt.Println("No more files to assign.")
+	log.Println("No more files to assign.")
 	done = true
 	return ""
 }
@@ -79,11 +79,11 @@ func nextAvailableTask(args WorkerArgs) string {
 		if assignedTaskStatus[fileName] == Processing {
 			assignedTaskStatus[fileName] = TimedOut
 			tasksQueue = append(tasksQueue, fileName)
-			fmt.Printf("The completion of %q task has just timed out. It is back to the queue.\n", fileName)
+			log.Printf("The completion of %q task has just timed out. It is back to the queue.\n", fileName)
 		}
 	}()
 
-	fmt.Printf("%q will be assigned to a worker.\n", fileName)
+	log.Printf("%q will be assigned to a worker.\n", fileName)
 	return fileName
 }
 
@@ -92,15 +92,22 @@ func removeProcessedTasksFromQueue() {
 	if len(processedTasks) == 0 {
 		return
 	}
+	// TODO
+	// worker creates nReduce intermediate files per task
+	// this next function does not check that properly.
+	// Ideally it should return the task name, instead it is also
+	// returning the task file number too.
+	// --> the normalization should remove this number.
+	// --> does it any value to keep on handling the file extension?
 	var normalizedTaskNames = removeMapOutputPrefix(processedTasks)
 	for _, processedFileName := range normalizedTaskNames {
 		if assignedTaskStatus[processedFileName] == Processing {
 			assignedTaskStatus[processedFileName] = Processed
 			removeFromArray(tasksQueue, processedFileName)
-			fmt.Printf("Removing task \"%q\" from queue.\n", processedFileName)
+			log.Printf("Removing task %q from queue.\n", processedFileName)
 		}
 		// else {
-		// 	fmt.Printf("%q has already timed out to process task %q. Another one should be assigned to it now.\n",
+		// 	log.Printf("%q has already timed out to process task %q. Another one should be assigned to it now.\n",
 		// 		args.workerName, args.processedFileName)
 		// }
 	}
@@ -161,7 +168,8 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	tasksQueue = files
 	nReduceTasks = nReduce
 
-	log.Printf("Starting up coordinator with files: %q", files)
+	log.Printf("Starting up coordinator with files: %s\n", files)
+	log.Printf("Starting up coordinator for %d reduce tasks.", nReduceTasks)
 
 	c.server()
 	return &c
