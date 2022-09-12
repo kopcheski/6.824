@@ -42,18 +42,13 @@ type Coordinator struct {
 // the RPC argument and reply types are defined in rpc.go.
 func (c *Coordinator) Example(args *WorkerArgs, reply *FileNameReply) error {
 
-	reply.taskFileName = assignTask(WorkerArgs{args.workerName, args.processedFileName})
+	reply.taskFileName = assignTask(WorkerArgs{})
 
 	return nil
 }
 
 func assignTask(args WorkerArgs) string {
 
-	// TODO I will also need to handle the intermediate files. :)
-	// poll FS for finished tasks (map&reduce)
-
-	// to remove already processed tasks from queue
-	// non-thread safe with go func
 	removeProcessedTasksFromQueue()
 
 	allMapTasksProcessed := len(tasksQueue) == 0 && !reduceTasksStarted
@@ -88,7 +83,7 @@ func nextAvailableTask(args WorkerArgs) string {
 		}
 	}()
 
-	fmt.Printf("%q will be assigned to worker %q.\n", fileName, args.workerName)
+	fmt.Printf("%q will be assigned to a worker.\n", fileName)
 	return fileName
 }
 
@@ -165,6 +160,8 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 	tasksQueue = files
 	nReduceTasks = nReduce
+
+	log.Printf("Starting up coordinator with files: %q", files)
 
 	c.server()
 	return &c

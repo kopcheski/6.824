@@ -29,8 +29,6 @@ type FileNameReply struct {
 }
 
 type WorkerArgs struct {
-	workerName        string
-	processedFileName string
 }
 
 // Add your RPC definitions here.

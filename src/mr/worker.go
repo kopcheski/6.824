@@ -40,9 +40,6 @@ func ihash(key string) int {
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
-	// coord still does not know how to handle files create by the map function. How to inform it?
-	// the coord will _have_ to poll the FS, as stated by the rules.
-
 	var reply = RequestTask()
 
 	if strings.HasPrefix(reply, intermediateFileNamePrefix) {
@@ -158,10 +155,6 @@ func RequestTask() string {
 
 	// declare an argument structure.
 	args := WorkerArgs{}
-
-	// fill in the argument(s).
-	args.processedFileName = ""
-	args.workerName = ""
 
 	// declare a reply structure.
 	reply := FileNameReply{}

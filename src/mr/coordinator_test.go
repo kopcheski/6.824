@@ -14,7 +14,7 @@ func TestEmptyFileList(t *testing.T) {
 
 	tasksQueue = files
 
-	var worker = WorkerArgs{"Worker-1", ""}
+	var worker = WorkerArgs{}
 	var fileName = assignTask(worker)
 
 	if fileName != "" {
@@ -27,7 +27,7 @@ func TestAssignTheFirstFile(t *testing.T) {
 
 	tasksQueue = files[0:2]
 
-	var worker = WorkerArgs{"Worker-1", ""}
+	var worker = WorkerArgs{}
 	var fileName = assignTask(worker)
 
 	if fileName != "pg-being_ernest.txt" {
@@ -42,14 +42,14 @@ func TestAssignAllFilesUntilThereAreNoMoreFilesLeft(t *testing.T) {
 	var files = [2]string{"pg-being_ernest.txt", "pg-dorian_grey.txt"}
 	tasksQueue = files[0:2]
 
-	var fileName1 = assignTask(WorkerArgs{"Worker-1", ""})
+	var fileName1 = assignTask(WorkerArgs{})
 	createFile(intermediateFileNamePrefix + files[0])
-	var fileName2 = assignTask(WorkerArgs{"Worker-2", ""})
+	var fileName2 = assignTask(WorkerArgs{})
 	createFile(intermediateFileNamePrefix + files[1])
 	// starts assign reduce tasks
-	var fileName3 = assignTask(WorkerArgs{"Worker-1", ""})
-	var fileName4 = assignTask(WorkerArgs{"Worker-1", ""})
-	var fileName5 = assignTask(WorkerArgs{"Worker-1", ""})
+	var fileName3 = assignTask(WorkerArgs{})
+	var fileName4 = assignTask(WorkerArgs{})
+	var fileName5 = assignTask(WorkerArgs{})
 
 	assert.Equal(t, "pg-being_ernest.txt", fileName1)
 	assert.Equal(t, "pg-dorian_grey.txt", fileName2)
@@ -63,7 +63,7 @@ func TestTaskGoesBackToQueueWhenExecutionTimesOut(t *testing.T) {
 
 	tasksQueue = files[0:2]
 
-	var fileName = assignTask(WorkerArgs{"Worker-1", ""})
+	var fileName = assignTask(WorkerArgs{})
 	time.Sleep(timeout + (1 + time.Second))
 
 	assert.Equal(t, assignedTaskStatus[fileName], TimedOut)
@@ -82,7 +82,7 @@ func TestCoordinatorIsDoneWhenThereAreNoMoreTasksToProcess(t *testing.T) {
 	var c = Coordinator{}
 	assert.False(t, c.Done())
 
-	var worker = WorkerArgs{"Worker-1", ""}
+	var worker = WorkerArgs{}
 	assignTask(worker)
 
 	assert.True(t, c.Done())
