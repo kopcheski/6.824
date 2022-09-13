@@ -88,6 +88,12 @@ func TestCoordinatorIsDoneWhenThereAreNoMoreTasksToProcess(t *testing.T) {
 	assert.True(t, c.Done())
 }
 
+func TestExtractTaskName(t *testing.T) {
+	var fileName = "mr-task-name-99.txt"
+
+	assert.Equal(t, "task-name", extractTaskName(fileName))
+}
+
 func createFile(fileName string) {
 	ofile, _ := os.Create(fileName)
 	ofile.Close()

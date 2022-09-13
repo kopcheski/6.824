@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -30,6 +31,8 @@ var assignedTaskStatus = make(map[string]TaskStatus)
 var nReduceTasks int
 
 var done = false
+
+var mu sync.Mutex
 
 type Coordinator struct {
 }
@@ -71,11 +74,16 @@ func assignTask(args WorkerArgs) string {
 func nextAvailableTask(args WorkerArgs) string {
 	var fileName = tasksQueue[0]
 	tasksQueue = tasksQueue[1:]
+
+	mu.Lock()
 	assignedTaskStatus[fileName] = Processing
+	mu.Unlock()
 
 	go func() {
 		time.Sleep(timeout)
-		// function to verify timed out tasks
+		
+		mu.Lock()
+		defer mu.Unlock()
 		if assignedTaskStatus[fileName] == Processing {
 			assignedTaskStatus[fileName] = TimedOut
 			tasksQueue = append(tasksQueue, fileName)
@@ -89,41 +97,45 @@ func nextAvailableTask(args WorkerArgs) string {
 
 func removeProcessedTasksFromQueue() {
 	var processedTasks = findIntermediateFiles()
-	if len(processedTasks) == 0 {
+	if len(processedTasks) < nReduceTasks {
 		return
 	}
-	// TODO
-	// worker creates nReduce intermediate files per task
-	// this next function does not check that properly.
-	// Ideally it should return the task name, instead it is also
-	// returning the task file number too.
-	// --> the normalization should remove this number.
-	// --> does it any value to keep on handling the file extension?
 	var normalizedTaskNames = removeMapOutputPrefix(processedTasks)
+	mu.Lock()
+	defer mu.Unlock()
 	for _, processedFileName := range normalizedTaskNames {
 		if assignedTaskStatus[processedFileName] == Processing {
 			assignedTaskStatus[processedFileName] = Processed
 			removeFromArray(tasksQueue, processedFileName)
 			log.Printf("Removing task %q from queue.\n", processedFileName)
 		}
-		// else {
-		// 	log.Printf("%q has already timed out to process task %q. Another one should be assigned to it now.\n",
-		// 		args.workerName, args.processedFileName)
-		// }
 	}
 }
 
 func removeMapOutputPrefix(processedTasks []string) []string {
 	var normalizedTaskNames = make([]string, len(processedTasks))
 	for i, v := range processedTasks {
-		var _, after, _ = strings.Cut(v, intermediateFileNamePrefix)
-		normalizedTaskNames[i] = after
+		normalizedTaskNames[i] = extractTaskName(v)
 	}
 	return normalizedTaskNames
 }
 
+func extractTaskName(fileName string) string {
+	return removeSuffix(removePrefix(fileName))
+}
+
+func removePrefix(v string) string {
+	var _, after, _ = strings.Cut(v, intermediateFileNamePrefix)
+	return after
+}
+
+func removeSuffix(v string) string {
+	var suffixIndex = strings.LastIndexByte(v, '-')
+	return v[:suffixIndex] + ".txt" // gives extension back
+}
+
 func findIntermediateFiles() []string {
-	files, err := filepath.Glob("mr-*")
+	files, err := filepath.Glob(intermediateFileNamePrefix + "*")
 	if err != nil {
 		panic(err)
 	}
