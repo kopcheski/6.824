@@ -57,12 +57,26 @@ func TestWriteMapToFiles(t *testing.T) {
 	intermediateMap[0] = intermediate[0:2]
 	intermediateMap[1] = intermediate[2:3]
 
-	writeToFiles(intermediateMap, fileNamePrefix)
+	writeToIntermediateFiles(intermediateMap, fileNamePrefix)
 
 	assert.Equal(t, "{house 1}\n{sky 1}\n", readFileToString("mr-0"))
 	assert.Equal(t, "{boat 1}\n", readFileToString("mr-1"))
 
 	defer deleteFilesStartingWith(fileNamePrefix)
+}
+
+func TestWriteAndReadIntermediateFile(t *testing.T) {
+	var prefix = "intermediate-sample"
+	deleteFilesStartingWith(prefix)
+	defer deleteFilesStartingWith(prefix)
+
+	var intermediateMap = make(map[int][]KeyValue)
+	intermediateMap[0] = []KeyValue{{"A", "1"}, {"B", "1"}}
+
+	writeToIntermediateFiles(intermediateMap, prefix)
+	var kva = readIntermediateFileToKeyValue(prefix + "-0.txt")
+
+	assert.Equal(t, intermediateMap[0], kva)
 }
 
 func deleteFilesStartingWith(fileNamePrefix string) {

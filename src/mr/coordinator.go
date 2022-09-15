@@ -81,10 +81,12 @@ func nextAvailableTask(args WorkerArgs) string {
 
 	go func() {
 		time.Sleep(timeout)
-		
+
 		mu.Lock()
 		defer mu.Unlock()
 		if assignedTaskStatus[fileName] == Processing {
+			// FIXME reduce tasks are erroneously falling here
+			// -> the problem is likely to be in removeProcessedTasksFromQueue
 			assignedTaskStatus[fileName] = TimedOut
 			tasksQueue = append(tasksQueue, fileName)
 			log.Printf("The completion of %q task has just timed out. It is back to the queue.\n", fileName)

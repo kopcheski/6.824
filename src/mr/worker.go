@@ -1,7 +1,7 @@
 package mr
 
 import (
-	"bufio"
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
 	"io/ioutil"
@@ -44,10 +44,10 @@ func Worker(mapf func(string, string) []KeyValue,
 
 	var reply = RequestTask()
 
-	if strings.HasPrefix(reply, intermediateFileNamePrefix) {
-		reduceKeyValue(reply, reducef)
-	} else if strings.HasPrefix(reply, "pg-") {
+	if strings.HasPrefix(reply, "pg-") {
 		mapTextToKeyValue(reply, mapf)
+	} else if strings.HasPrefix(reply, intermediateFileNamePrefix) {
+		reduceKeyValue(reply, reducef)
 	} else {
 		log.Panicf("no appropiate function for file %q.", reply)
 	}
@@ -59,34 +59,45 @@ func reduceKeyValue(fileName string, reducef func(string, []string) string) {
 		return
 	}
 
-	content, err := readLines(fileName)
-	if err != nil {
-		log.Panicf("error reading file %q.\n%q", fileName, err)
+	kva := readIntermediateFileToKeyValue(fileName)
+	log.Printf("%q has %d entries.", fileName, len(kva))
+
+	oname := "mr-out-0"
+	ofile, err := os.Create(oname)
+	if (err != nil) {
+		log.Panic(err)
 	}
+	defer ofile.Close()
 
-	reduced := reducef(fileName, content)
-	log.Printf("%q was reduced to %q", content, reduced)
-
-	// REDUCE impl:
-	// [ ] write output to mr-out-X
-	// [ ] one line per return of the reducef call
-	// [ ] line should be formatted as "%v %v", key and value respectively
-
+	var toReduce []string
+	var previousKey string
+	for i, v := range kva {
+		if i == 0 {
+			previousKey = v.Key
+		}
+		if previousKey == v.Key {
+			toReduce = append(toReduce, v.Key)
+		} else {
+			reduced := reducef(fileName, toReduce)
+			previousKey = v.Key
+			toReduce = nil
+			fmt.Fprintf(ofile, "%v %v\n", v.Key, reduced)
+		}
+	}
+	log.Printf("Finished reducing the file %q.", fileName)
 }
 
-func readLines(path string) ([]string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
+func readIntermediateFileToKeyValue(fileName string) []KeyValue {
+	var bytes, err = ioutil.ReadFile(fileName)
+	if (err != nil) {
+		log.Panic(err)
 	}
-	defer file.Close()
 
-	var lines []string
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
-	}
-	return lines, scanner.Err()
+	var fileContent = string(bytes)
+	jsonArray := []KeyValue{}
+ 
+    json.Unmarshal([]byte(fileContent), &jsonArray)
+	return jsonArray
 }
 
 func mapTextToKeyValue(fileName string, mapf func(string, string) []KeyValue) {
@@ -104,17 +115,21 @@ func mapTextToKeyValue(fileName string, mapf func(string, string) []KeyValue) {
 
 	var b, _, _ = strings.Cut(fileName, ".txt")
 	var fileNamePrefix = intermediateFileNamePrefix + b
-	writeToFiles(intermediateMap, fileNamePrefix)
+	writeToIntermediateFiles(intermediateMap, fileNamePrefix)
 }
 
-func writeToFiles(intermediateMap map[int][]KeyValue, fileNamePrefix string) {
+func writeToIntermediateFiles(intermediateMap map[int][]KeyValue, fileNamePrefix string) {
 	for key, element := range intermediateMap {
+		jsonStr, err := json.Marshal(element)
 
 		oname := fileNamePrefix + "-" + fmt.Sprint(key) + ".txt"
 		ofile, _ := os.Create(oname)
 
-		for _, s := range element {
-			fmt.Fprintf(ofile, "%v\n", s)
+		if err != nil {
+			fmt.Printf("Error: %s", err.Error())
+		} else {
+			log.Printf("Writing file %q", oname)
+			fmt.Fprintf(ofile, "%v\n", string(jsonStr))
 		}
 
 		ofile.Close()
