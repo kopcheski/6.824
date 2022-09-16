@@ -44,6 +44,11 @@ type Coordinator struct {
 // the RPC argument and reply types are defined in rpc.go.
 func (c *Coordinator) Example(args *WorkerArgs, reply *CoordinatorReply) error {
 
+	if done {
+		reply.TaskFileName = ""
+		return nil
+	}
+
 	reply.TaskFileName = assignTask(WorkerArgs{})
 	reply.NReduceTasks = nReduceTasks
 
@@ -56,7 +61,7 @@ func assignTask(args WorkerArgs) string {
 
 	allMapTasksProcessed := len(tasksQueue) == 0 && !reduceTasksStarted
 	if allMapTasksProcessed {
-		tasksQueue = findIntermediateFiles()
+		tasksQueue = findIntermediateFiles("")
 		reduceTasksStarted = true
 		log.Println("All map tasks are finished.")
 		log.Println("Starting up reduce tasks.")
@@ -67,8 +72,14 @@ func assignTask(args WorkerArgs) string {
 	}
 
 	log.Println("No more files to assign.")
-	done = true
+	markDone()
 	return ""
+}
+
+func markDone() {
+	mu.Lock()
+	done = true
+	mu.Unlock()
 }
 
 func nextAvailableTask(args WorkerArgs) string {
@@ -98,46 +109,30 @@ func nextAvailableTask(args WorkerArgs) string {
 }
 
 func removeProcessedTasksFromQueue() {
-	var processedTasks = findIntermediateFiles()
-	if len(processedTasks) < nReduceTasks {
-		return
-	}
-	var normalizedTaskNames = removeMapOutputPrefix(processedTasks)
 	mu.Lock()
 	defer mu.Unlock()
-	for _, processedFileName := range normalizedTaskNames {
-		if assignedTaskStatus[processedFileName] == Processing {
-			assignedTaskStatus[processedFileName] = Processed
-			removeFromArray(tasksQueue, processedFileName)
-			log.Printf("Removing task %q from queue.\n", processedFileName)
+	for key, _ := range assignedTaskStatus {
+		if isProcessed(key) {
+			assignedTaskStatus[key] = Processed
+			removeFromArray(tasksQueue, key)
+			log.Printf("Task %q was processed. Removing it from queue.\n", key)
 		}
 	}
 }
 
-func removeMapOutputPrefix(processedTasks []string) []string {
-	var normalizedTaskNames = make([]string, len(processedTasks))
-	for i, v := range processedTasks {
-		normalizedTaskNames[i] = extractTaskName(v)
+func isProcessed(taskName string) bool {
+	if (reduceTasksStarted) {
+		var processedTasks = findIntermediateFiles(taskName)
+		return len(processedTasks) == 0
+	} else {
+		var processedTasks = findIntermediateFiles(taskName)
+		return len(processedTasks) == nReduceTasks
 	}
-	return normalizedTaskNames
 }
 
-func extractTaskName(fileName string) string {
-	return removeSuffix(removePrefix(fileName))
-}
-
-func removePrefix(v string) string {
-	var _, after, _ = strings.Cut(v, intermediateFileNamePrefix)
-	return after
-}
-
-func removeSuffix(v string) string {
-	var suffixIndex = strings.LastIndexByte(v, '-')
-	return v[:suffixIndex] + ".txt" // gives extension back
-}
-
-func findIntermediateFiles() []string {
-	files, err := filepath.Glob(intermediateFileNamePrefix + "*")
+func findIntermediateFiles(taskName string) []string {
+	var fileNameWithoutExtension = strings.TrimSuffix(taskName, filepath.Ext(taskName))
+	files, err := filepath.Glob(intermediateFileNamePrefix + fileNameWithoutExtension + "*")
 	if err != nil {
 		panic(err)
 	}

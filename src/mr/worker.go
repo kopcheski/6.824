@@ -48,8 +48,10 @@ func Worker(mapf func(string, string) []KeyValue,
 		mapTextToKeyValue(reply, mapf)
 	} else if strings.HasPrefix(reply, intermediateFileNamePrefix) {
 		reduceKeyValue(reply, reducef)
+	} else if reply == "" {
+		log.Println("Coordinator did not send a task to this worker. Queue is over.")
 	} else {
-		log.Panicf("no appropiate function for file %q.", reply)
+		log.Panicf("Invalid file name: %q.", reply)
 	}
 
 }
@@ -85,6 +87,10 @@ func reduceKeyValue(fileName string, reducef func(string, []string) string) {
 		}
 	}
 	log.Printf("Finished reducing the file %q.", fileName)
+	var errRemove = os.Remove(fileName)
+	if errRemove != nil {
+		log.Panic(errRemove)
+	}
 }
 
 func readIntermediateFileToKeyValue(fileName string) []KeyValue {

@@ -70,9 +70,6 @@ func TestTaskGoesBackToQueueWhenExecutionTimesOut(t *testing.T) {
 	assert.ElementsMatch(t, files, tasksQueue)
 }
 
-func TestRemoveFinishedTaskFromTheQueue(t *testing.T) {
-}
-
 func TestCoordinatorIsDoneWhenThereAreNoMoreTasksToProcess(t *testing.T) {
 	t.Skip("The current implementation of this Done is now invalid. Fix it.")
 	var files = [1]string{"pg-being_ernest.txt"}
@@ -86,12 +83,6 @@ func TestCoordinatorIsDoneWhenThereAreNoMoreTasksToProcess(t *testing.T) {
 	assignTask(worker)
 
 	assert.True(t, c.Done())
-}
-
-func TestExtractTaskName(t *testing.T) {
-	var fileName = "mr-task-name-99.txt"
-
-	assert.Equal(t, "task-name", extractTaskName(fileName))
 }
 
 func createFile(fileName string) {
