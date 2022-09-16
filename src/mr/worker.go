@@ -43,16 +43,16 @@ func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
 	var reply = RequestTask()
+	
+	if reply.TaskFileName == "" {
+		log.Panicf("Coordinator did not send a task to this worker. Queue is over.")
+	} 
 
-	if strings.HasPrefix(reply, "pg-") {
-		mapTextToKeyValue(reply, mapf)
-	} else if strings.HasPrefix(reply, intermediateFileNamePrefix) {
-		reduceKeyValue(reply, reducef)
-	} else if reply == "" {
-		log.Println("Coordinator did not send a task to this worker. Queue is over.")
+	if reply.Map {
+		mapTextToKeyValue(reply.TaskFileName, mapf)
 	} else {
-		log.Panicf("Invalid file name: %q.", reply)
-	}
+		reduceKeyValue(reply.TaskFileName, reducef)
+	} 
 
 }
 
@@ -175,7 +175,7 @@ func readFileToString(fileName string) string {
 // example function to show how to make an RPC call to the coordinator.
 //
 // the RPC argument and reply types are defined in rpc.go.
-func RequestTask() string {
+func RequestTask() CoordinatorReply {
 
 	// declare an argument structure.
 	args := WorkerArgs{}
@@ -190,11 +190,10 @@ func RequestTask() string {
 	if ok {
 		nReduce = reply.NReduceTasks
 		log.Printf("Got task %v to process.\n", reply.TaskFileName)
-		return reply.TaskFileName
 	} else {
-		log.Printf("call failed!\n")
-		return ""
+		log.Panic("call failed!\n")
 	}
+	return reply
 
 }
 

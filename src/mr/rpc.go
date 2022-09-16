@@ -27,6 +27,7 @@ type ExampleReply struct {
 type CoordinatorReply struct {
 	TaskFileName string
 	NReduceTasks int
+	Map bool
 }
 
 type WorkerArgs struct {

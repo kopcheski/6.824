@@ -51,6 +51,7 @@ func (c *Coordinator) Example(args *WorkerArgs, reply *CoordinatorReply) error {
 
 	reply.TaskFileName = assignTask(WorkerArgs{})
 	reply.NReduceTasks = nReduceTasks
+	reply.Map = !reduceTasksStarted
 
 	return nil
 }
