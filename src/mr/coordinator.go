@@ -34,6 +34,8 @@ var done = false
 
 var mu sync.Mutex
 
+var relativePath string
+
 type Coordinator struct {
 }
 
@@ -52,6 +54,19 @@ func (c *Coordinator) Example(args *WorkerArgs, reply *CoordinatorReply) error {
 	reply.TaskFileName = assignTask(WorkerArgs{})
 	reply.NReduceTasks = nReduceTasks
 	reply.Map = !reduceTasksStarted
+	reply.RelativePath = relativePath
+
+	return nil
+}
+
+func (c *Coordinator) FinishTask(args *WorkerArgs, reply *CoordinatorReply) error {
+
+	var taskName = args.TaskFileName
+	if isProcessed(taskName) {
+		removeTaskFromQueue(taskName)
+	} else {
+		log.Printf("[Coordinator] Task %q was requested to be removed from the queue, but it is not processed yet", taskName)
+	}
 
 	return nil
 }
@@ -64,15 +79,15 @@ func assignTask(args WorkerArgs) string {
 	if allMapTasksProcessed {
 		tasksQueue = findIntermediateFiles("")
 		reduceTasksStarted = true
-		log.Println("All map tasks are finished.")
-		log.Println("Starting up reduce tasks.")
+		log.Println("[Coordinator] All map tasks are finished.")
+		log.Println("[Coordinator] Starting up reduce tasks.")
 	}
 
 	if len(tasksQueue) > 0 {
 		return nextAvailableTask(args)
 	}
 
-	log.Println("No more files to assign.")
+	log.Println("[Coordinator] No more files to assign.")
 	markDone()
 	return ""
 }
@@ -84,10 +99,9 @@ func markDone() {
 }
 
 func nextAvailableTask(args WorkerArgs) string {
+	mu.Lock()
 	var fileName = tasksQueue[0]
 	tasksQueue = tasksQueue[1:]
-
-	mu.Lock()
 	assignedTaskStatus[fileName] = Processing
 	mu.Unlock()
 
@@ -101,24 +115,28 @@ func nextAvailableTask(args WorkerArgs) string {
 			// -> the problem is likely to be in removeProcessedTasksFromQueue
 			assignedTaskStatus[fileName] = TimedOut
 			tasksQueue = append(tasksQueue, fileName)
-			log.Printf("The completion of %q task has just timed out. It is back to the queue.\n", fileName)
+			log.Printf("[Coordinator] The completion of %q task has just timed out. It is back to the queue.\n", fileName)
 		}
 	}()
 
-	log.Printf("%q will be assigned to a worker.\n", fileName)
+	log.Printf("[Coordinator] %q will be assigned to a worker.\n", fileName)
 	return fileName
 }
 
 func removeProcessedTasksFromQueue() {
-	mu.Lock()
-	defer mu.Unlock()
-	for key, _ := range assignedTaskStatus {
+	for key := range assignedTaskStatus {
 		if isProcessed(key) {
-			assignedTaskStatus[key] = Processed
-			removeFromArray(tasksQueue, key)
-			log.Printf("Task %q was processed. Removing it from queue.\n", key)
+			removeTaskFromQueue(key)
 		}
 	}
+}
+
+func removeTaskFromQueue(taskName string) {
+	mu.Lock()
+	defer mu.Unlock()
+	assignedTaskStatus[taskName] = Processed
+	removeFromArray(tasksQueue, taskName)
+	log.Printf("[Coordinator] Task %q was processed. Removing it from queue.\n", taskName)
 }
 
 func isProcessed(taskName string) bool {
@@ -133,9 +151,15 @@ func isProcessed(taskName string) bool {
 
 func findIntermediateFiles(taskName string) []string {
 	var fileNameWithoutExtension = strings.TrimSuffix(taskName, filepath.Ext(taskName))
-	files, err := filepath.Glob(intermediateFileNamePrefix + fileNameWithoutExtension + "*")
+	var fileNamePattern = intermediateFileNamePrefix + fileNameWithoutExtension + "*"
+	var fileNamePatterWithPath = filepath.Join(relativePath, fileNamePattern)
+	log.Printf("[Coordinator] Looking for intermediate files: %q", fileNamePatterWithPath)
+	files, err := filepath.Glob(fileNamePatterWithPath)
 	if err != nil {
 		panic(err)
+	}
+	for i, v := range files {
+		files[i] = filepath.Base(v)
 	}
 	return files
 }
@@ -158,7 +182,7 @@ func (c *Coordinator) server() {
 	os.Remove(sockname)
 	l, e := net.Listen("unix", sockname)
 	if e != nil {
-		log.Fatal("listen error:", e)
+		log.Fatal("[Coordinator] listen error:", e)
 	}
 	go http.Serve(l, nil)
 }
@@ -175,11 +199,14 @@ func (c *Coordinator) Done() bool {
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{}
 
-	tasksQueue = files
+	relativePath = filepath.Dir(files[0])
 	nReduceTasks = nReduce
+	for _, v := range files {
+		tasksQueue = append(tasksQueue, filepath.Base(v))
+	}
 
-	log.Printf("Starting up coordinator with files: %s\n", files)
-	log.Printf("Starting up coordinator for %d reduce tasks.", nReduceTasks)
+	log.Printf("[Coordinator] Starting up coordinator with files: %s\n", files)
+	log.Printf("[Coordinator] Starting up coordinator for %d reduce tasks.", nReduceTasks)
 
 	c.server()
 	return &c

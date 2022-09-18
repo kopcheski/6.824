@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/rpc"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -15,6 +16,8 @@ import (
 var intermediateFileNamePrefix = "mr-"
 
 var nReduce int
+
+var fileRelativePath string
 
 // for sorting by key.
 type ByKey []KeyValue
@@ -42,10 +45,13 @@ func ihash(key string) int {
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
+	log.Printf("[Worker] Started.")
+
 	var reply = RequestTask()
+	fileRelativePath = reply.RelativePath
 	
 	if reply.TaskFileName == "" {
-		log.Panicf("Coordinator did not send a task to this worker. Queue is over.")
+		log.Panicf("[Worker] Coordinator did not send a task to this worker. Queue is over.")
 	} 
 
 	if reply.Map {
@@ -54,6 +60,8 @@ func Worker(mapf func(string, string) []KeyValue,
 		reduceKeyValue(reply.TaskFileName, reducef)
 	} 
 
+	FinishTask(reply.TaskFileName)
+	log.Printf("[Worker] Finished.")
 }
 
 func reduceKeyValue(fileName string, reducef func(string, []string) string) {
@@ -62,7 +70,7 @@ func reduceKeyValue(fileName string, reducef func(string, []string) string) {
 	}
 
 	kva := readIntermediateFileToKeyValue(fileName)
-	log.Printf("%q has %d entries.", fileName, len(kva))
+	log.Printf("[Worker] %q has %d entries.", fileName, len(kva))
 
 	oname := "mr-out-0"
 	ofile, err := os.Create(oname)
@@ -86,7 +94,7 @@ func reduceKeyValue(fileName string, reducef func(string, []string) string) {
 			fmt.Fprintf(ofile, "%v %v\n", v.Key, reduced)
 		}
 	}
-	log.Printf("Finished reducing the file %q.", fileName)
+	log.Printf("[Worker] Finished reducing the file %q.", fileName)
 	var errRemove = os.Remove(fileName)
 	if errRemove != nil {
 		log.Panic(errRemove)
@@ -94,7 +102,8 @@ func reduceKeyValue(fileName string, reducef func(string, []string) string) {
 }
 
 func readIntermediateFileToKeyValue(fileName string) []KeyValue {
-	var bytes, err = ioutil.ReadFile(fileName)
+	var filenNameWithPath = filepath.Join(fileRelativePath + fileName)
+	var bytes, err = ioutil.ReadFile(filenNameWithPath)
 	if (err != nil) {
 		log.Panic(err)
 	}
@@ -128,13 +137,14 @@ func writeToIntermediateFiles(intermediateMap map[int][]KeyValue, fileNamePrefix
 	for key, element := range intermediateMap {
 		jsonStr, err := json.Marshal(element)
 
-		oname := fileNamePrefix + "-" + fmt.Sprint(key) + ".txt"
+		var fileName = fileNamePrefix + "-" + fmt.Sprint(key) + ".txt"
+		oname := filepath.Join(fileRelativePath, fileName)
 		ofile, _ := os.Create(oname)
 
 		if err != nil {
-			fmt.Printf("Error: %s", err.Error())
+			fmt.Printf("[Worker] Error: %s", err.Error())
 		} else {
-			log.Printf("Writing file %q", oname)
+			log.Printf("[Worker] Writing file %q", oname)
 			fmt.Fprintf(ofile, "%v\n", string(jsonStr))
 		}
 
@@ -160,13 +170,14 @@ func splitIntoBuckets(kva []KeyValue) map[int][]KeyValue {
 }
 
 func readFileToString(fileName string) string {
-	file, err := os.Open(fileName)
+	var fileNameWithPath = filepath.Join(fileRelativePath, fileName)
+	file, err := os.Open(fileNameWithPath)
 	if err != nil {
-		log.Fatalf("cannot open %v", fileName)
+		log.Fatalf("[Worker] cannot open %v", fileNameWithPath)
 	}
 	content, err := ioutil.ReadAll(file)
 	if err != nil {
-		log.Fatalf("cannot read %v", fileName)
+		log.Fatalf("[Worker] cannot read %v", fileNameWithPath)
 	}
 	file.Close()
 	return string(content)
@@ -189,12 +200,21 @@ func RequestTask() CoordinatorReply {
 	ok := call("Coordinator.Example", &args, &reply)
 	if ok {
 		nReduce = reply.NReduceTasks
-		log.Printf("Got task %v to process.\n", reply.TaskFileName)
+		log.Printf("[Worker] Got task %v to process.\n", reply.TaskFileName)
 	} else {
-		log.Panic("call failed!\n")
+		log.Panic("[Worker] call failed!\n")
 	}
 	return reply
 
+}
+
+func FinishTask(taskName string) {
+	args := WorkerArgs{taskName}
+	reply := CoordinatorReply{}
+	ok := call("Coordinator.FinishTask", &args, &reply)
+	if !ok {
+		log.Panic("[Worker] call to FinishTask failed!\n")
+	}
 }
 
 // send an RPC request to the coordinator, wait for the response.
@@ -205,7 +225,7 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 	sockname := coordinatorSock()
 	c, err := rpc.DialHTTP("unix", sockname)
 	if err != nil {
-		log.Fatal("dialing:", err)
+		log.Fatal("[Worker] dialing:", err)
 	}
 	defer c.Close()
 
