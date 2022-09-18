@@ -67,6 +67,7 @@ func (c *Coordinator) FinishTask(args *WorkerArgs, reply *CoordinatorReply) erro
 	} else {
 		log.Printf("[Coordinator] Task %q was requested to be removed from the queue, but it is not processed yet", taskName)
 	}
+	reply.JobDone = done
 
 	return nil
 }
@@ -75,6 +76,8 @@ func assignTask(args WorkerArgs) string {
 
 	removeProcessedTasksFromQueue()
 
+	// mu.Lock()
+	// defer mu.Unlock()
 	allMapTasksProcessed := len(tasksQueue) == 0 && !reduceTasksStarted
 	if allMapTasksProcessed {
 		tasksQueue = findIntermediateFiles("")
@@ -111,8 +114,6 @@ func nextAvailableTask(args WorkerArgs) string {
 		mu.Lock()
 		defer mu.Unlock()
 		if assignedTaskStatus[fileName] == Processing {
-			// FIXME reduce tasks are erroneously falling here
-			// -> the problem is likely to be in removeProcessedTasksFromQueue
 			assignedTaskStatus[fileName] = TimedOut
 			tasksQueue = append(tasksQueue, fileName)
 			log.Printf("[Coordinator] The completion of %q task has just timed out. It is back to the queue.\n", fileName)
@@ -124,6 +125,8 @@ func nextAvailableTask(args WorkerArgs) string {
 }
 
 func removeProcessedTasksFromQueue() {
+	mu.Lock()
+	defer mu.Unlock()
 	for key := range assignedTaskStatus {
 		if isProcessed(key) {
 			removeTaskFromQueue(key)

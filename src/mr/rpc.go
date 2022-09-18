@@ -29,6 +29,7 @@ type CoordinatorReply struct {
 	NReduceTasks int
 	Map bool
 	RelativePath string
+	JobDone bool
 }
 
 type WorkerArgs struct {

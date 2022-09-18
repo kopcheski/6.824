@@ -19,6 +19,8 @@ var nReduce int
 
 var fileRelativePath string
 
+var jobDone = false
+
 // for sorting by key.
 type ByKey []KeyValue
 
@@ -46,21 +48,22 @@ func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
 	log.Printf("[Worker] Started.")
-
-	var reply = RequestTask()
-	fileRelativePath = reply.RelativePath
+	for !jobDone {	
+		var reply = RequestTask()
+		fileRelativePath = reply.RelativePath
+		
+		if reply.TaskFileName == "" {
+			log.Panicf("[Worker] Coordinator did not send a task to this worker. Queue is over.")
+		} 
 	
-	if reply.TaskFileName == "" {
-		log.Panicf("[Worker] Coordinator did not send a task to this worker. Queue is over.")
-	} 
-
-	if reply.Map {
-		mapTextToKeyValue(reply.TaskFileName, mapf)
-	} else {
-		reduceKeyValue(reply.TaskFileName, reducef)
-	} 
-
-	FinishTask(reply.TaskFileName)
+		if reply.Map {
+			mapTextToKeyValue(reply.TaskFileName, mapf)
+		} else {
+			reduceKeyValue(reply.TaskFileName, reducef)
+		} 
+	
+		FinishTask(reply.TaskFileName)
+	}
 	log.Printf("[Worker] Finished.")
 }
 
@@ -215,6 +218,7 @@ func FinishTask(taskName string) {
 	if !ok {
 		log.Panic("[Worker] call to FinishTask failed!\n")
 	}
+	jobDone = reply.JobDone
 }
 
 // send an RPC request to the coordinator, wait for the response.
