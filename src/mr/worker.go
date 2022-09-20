@@ -98,15 +98,15 @@ func reduceKeyValue(fileName string, reducef func(string, []string) string) {
 		}
 	}
 	log.Printf("[Worker] Finished reducing the file %q.", fileName)
-	var errRemove = os.Remove(fileName)
+	var errRemove = os.Remove(filepath.Join(fileRelativePath, fileName))
 	if errRemove != nil {
 		log.Panic(errRemove)
 	}
 }
 
 func readIntermediateFileToKeyValue(fileName string) []KeyValue {
-	var filenNameWithPath = filepath.Join(fileRelativePath + fileName)
-	var bytes, err = ioutil.ReadFile(filenNameWithPath)
+	var fileNameWithPath = filepath.Join(fileRelativePath, fileName)
+	var bytes, err = ioutil.ReadFile(fileNameWithPath)
 	if (err != nil) {
 		log.Panic(err)
 	}

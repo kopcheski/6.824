@@ -45,6 +45,8 @@ type Coordinator struct {
 //
 // the RPC argument and reply types are defined in rpc.go.
 func (c *Coordinator) Example(args *WorkerArgs, reply *CoordinatorReply) error {
+	mu.Lock()
+	defer mu.Unlock()
 
 	if done {
 		reply.TaskFileName = ""
@@ -60,6 +62,8 @@ func (c *Coordinator) Example(args *WorkerArgs, reply *CoordinatorReply) error {
 }
 
 func (c *Coordinator) FinishTask(args *WorkerArgs, reply *CoordinatorReply) error {
+	mu.Lock()
+	defer mu.Unlock()
 
 	var taskName = args.TaskFileName
 	if isProcessed(taskName) {
@@ -76,8 +80,6 @@ func assignTask(args WorkerArgs) string {
 
 	removeProcessedTasksFromQueue()
 
-	// mu.Lock()
-	// defer mu.Unlock()
 	allMapTasksProcessed := len(tasksQueue) == 0 && !reduceTasksStarted
 	if allMapTasksProcessed {
 		tasksQueue = findIntermediateFiles("")
@@ -96,17 +98,13 @@ func assignTask(args WorkerArgs) string {
 }
 
 func markDone() {
-	mu.Lock()
 	done = true
-	mu.Unlock()
 }
 
 func nextAvailableTask(args WorkerArgs) string {
-	mu.Lock()
 	var fileName = tasksQueue[0]
 	tasksQueue = tasksQueue[1:]
 	assignedTaskStatus[fileName] = Processing
-	mu.Unlock()
 
 	go func() {
 		time.Sleep(timeout)
@@ -125,8 +123,6 @@ func nextAvailableTask(args WorkerArgs) string {
 }
 
 func removeProcessedTasksFromQueue() {
-	mu.Lock()
-	defer mu.Unlock()
 	for key := range assignedTaskStatus {
 		if isProcessed(key) {
 			removeTaskFromQueue(key)
@@ -135,8 +131,6 @@ func removeProcessedTasksFromQueue() {
 }
 
 func removeTaskFromQueue(taskName string) {
-	mu.Lock()
-	defer mu.Unlock()
 	assignedTaskStatus[taskName] = Processed
 	removeFromArray(tasksQueue, taskName)
 	log.Printf("[Coordinator] Task %q was processed. Removing it from queue.\n", taskName)
