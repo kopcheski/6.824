@@ -36,6 +36,10 @@ var mu sync.Mutex
 
 var relativePath string
 
+var nFilesToProcess int
+
+var nFilesProcessed int
+
 type Coordinator struct {
 }
 
@@ -48,6 +52,7 @@ func (c *Coordinator) Example(args *WorkerArgs, reply *CoordinatorReply) error {
 	mu.Lock()
 	defer mu.Unlock()
 
+	log.Printf("%d/%d tasks processed.", nFilesProcessed, nFilesToProcess)
 	if done {
 		reply.TaskFileName = ""
 		return nil
@@ -134,6 +139,7 @@ func removeTaskFromQueue(taskName string) {
 	assignedTaskStatus[taskName] = Processed
 	removeFromArray(tasksQueue, taskName)
 	log.Printf("[Coordinator] Task %q was processed. Removing it from queue.\n", taskName)
+	nFilesProcessed += 1
 }
 
 func isProcessed(taskName string) bool {
@@ -201,6 +207,8 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	for _, v := range files {
 		tasksQueue = append(tasksQueue, filepath.Base(v))
 	}
+
+	nFilesToProcess = len(files) * (nReduce + 1);
 
 	log.Printf("[Coordinator] Starting up coordinator with files: %s\n", files)
 	log.Printf("[Coordinator] Starting up coordinator for %d reduce tasks.", nReduceTasks)
