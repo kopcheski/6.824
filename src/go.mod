@@ -5,6 +5,7 @@ go 1.15
 require (
 	github.com/cilium/ebpf v0.9.1 // indirect
 	github.com/go-delve/delve v1.9.1 // indirect
+	github.com/google/uuid v1.3.0
 	github.com/inconshreveable/mousetrap v1.0.1 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/rivo/uniseg v0.3.4 // indirect

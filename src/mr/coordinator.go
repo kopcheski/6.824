@@ -52,7 +52,7 @@ func (c *Coordinator) Example(args *WorkerArgs, reply *CoordinatorReply) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	log.Printf("%d/%d tasks processed.", nFilesProcessed, nFilesToProcess)
+	//log.Printf("[Coordinator] %d/%d tasks processed.", nFilesProcessed, nFilesToProcess)
 	if done {
 		reply.TaskFileName = ""
 		return nil
@@ -71,11 +71,12 @@ func (c *Coordinator) FinishTask(args *WorkerArgs, reply *CoordinatorReply) erro
 	defer mu.Unlock()
 
 	var taskName = args.TaskFileName
-	if isProcessed(taskName) {
-		removeTaskFromQueue(taskName)
-	} else {
-		log.Printf("[Coordinator] Task %q was requested to be removed from the queue, but it is not processed yet", taskName)
-	}
+	log.Printf("[Coordinator] Received request to finish task %q.", taskName)
+	//if isProcessed(taskName) { WHY NOT TO TRUST THE WORKER?
+		markAsProcessed(taskName)
+	//} else {
+	//	log.Printf("[Coordinator] Task %q was requested to be removed from the queue, but it is not processed yet.\n", taskName)
+	//}
 	reply.JobDone = done
 
 	return nil
@@ -83,23 +84,28 @@ func (c *Coordinator) FinishTask(args *WorkerArgs, reply *CoordinatorReply) erro
 
 func assignTask(args WorkerArgs) string {
 
-	removeProcessedTasksFromQueue()
+	//removeProcessedTasksFromQueue()
 
-	allMapTasksProcessed := len(tasksQueue) == 0 && !reduceTasksStarted
+	allMapTasksProcessed := isAllTasksProcessed() && !reduceTasksStarted
 	if allMapTasksProcessed {
 		tasksQueue = findIntermediateFiles("")
 		reduceTasksStarted = true
+		assignedTaskStatus = make(map[string]TaskStatus)
 		log.Println("[Coordinator] All map tasks are finished.")
 		log.Println("[Coordinator] Starting up reduce tasks.")
 	}
 
 	if len(tasksQueue) > 0 {
 		return nextAvailableTask(args)
+	} 
+	
+	if isThereTaskBeingProcessed() {
+		return ""
+	} else {
+		log.Println("[Coordinator] No more files to assign.")
+		markDone()
+		return ""
 	}
-
-	log.Println("[Coordinator] No more files to assign.")
-	markDone()
-	return ""
 }
 
 func markDone() {
@@ -116,6 +122,7 @@ func nextAvailableTask(args WorkerArgs) string {
 
 		mu.Lock()
 		defer mu.Unlock()
+		log.Printf("Checking for potential timed out task %q. Current status is %v", fileName, assignedTaskStatus[fileName])
 		if assignedTaskStatus[fileName] == Processing {
 			assignedTaskStatus[fileName] = TimedOut
 			tasksQueue = append(tasksQueue, fileName)
@@ -127,24 +134,48 @@ func nextAvailableTask(args WorkerArgs) string {
 	return fileName
 }
 
-func removeProcessedTasksFromQueue() {
+// func removeProcessedTasksFromQueue() {
+// 	for key := range assignedTaskStatus {
+// 		if isProcessed(key) {
+// 			markAsProcessed(key)
+// 		}
+// 	}
+// }
+
+func isAllTasksProcessed() bool {
+	var allProcessed = true
 	for key := range assignedTaskStatus {
-		if isProcessed(key) {
-			removeTaskFromQueue(key)
+		if !isProcessed(key) {
+			allProcessed = false
+			break
 		}
 	}
+	return allProcessed && len(assignedTaskStatus) > 0
 }
 
-func removeTaskFromQueue(taskName string) {
+func isThereTaskBeingProcessed() bool {
+	var processing = false
+	for key := range assignedTaskStatus {
+		if assignedTaskStatus[key] == Processing {
+			processing = true
+			break
+		}
+	}
+	return processing && len(assignedTaskStatus) > 0
+}
+
+func markAsProcessed(taskName string) {
+	log.Printf("[Coordinator] Marking %q as processed.\n", taskName)
 	assignedTaskStatus[taskName] = Processed
-	removeFromArray(tasksQueue, taskName)
-	log.Printf("[Coordinator] Task %q was processed. Removing it from queue.\n", taskName)
-	nFilesProcessed += 1
+	// ==> FIXME assignTask already does that
+	// removeFromArray(tasksQueue, taskName) 
+	// log.Printf("[Coordinator] Task %q was processed. Removing it from queue.\n", taskName)
+	nFilesProcessed = nFilesProcessed + 1
 }
 
 func isProcessed(taskName string) bool {
 	if (reduceTasksStarted) {
-		var processedTasks = findIntermediateFiles(taskName)
+		var processedTasks = findIntermediateFiles(removeReduceCounterFromFileName(taskName))
 		return len(processedTasks) == 0
 	} else {
 		var processedTasks = findIntermediateFiles(taskName)
@@ -152,28 +183,34 @@ func isProcessed(taskName string) bool {
 	}
 }
 
+func removeReduceCounterFromFileName(taskName string) string {
+	var lastDash = strings.LastIndexByte(taskName, '-') 
+	return taskName[:lastDash]
+}
+
 func findIntermediateFiles(taskName string) []string {
+	var intermediatePrefix = intermediateFileNamePrefix
+	if (strings.HasPrefix(taskName, intermediateFileNamePrefix)) {
+		intermediatePrefix = "" //smelly, but to avoid unwanted files to be found
+	}
 	var fileNameWithoutExtension = strings.TrimSuffix(taskName, filepath.Ext(taskName))
-	var fileNamePattern = intermediateFileNamePrefix + fileNameWithoutExtension + "*"
+	var fileNamePattern = intermediatePrefix + fileNameWithoutExtension + "*"
 	var fileNamePatterWithPath = filepath.Join(relativePath, fileNamePattern)
-	log.Printf("[Coordinator] Looking for intermediate files: %q", fileNamePatterWithPath)
+	//log.Printf("[Coordinator] Looking for intermediate files: %q", fileNamePatterWithPath)
 	files, err := filepath.Glob(fileNamePatterWithPath)
 	if err != nil {
 		panic(err)
 	}
+	var intermediateFilesArray = make([]string, len(files))
 	for i, v := range files {
-		files[i] = filepath.Base(v)
-	}
-	return files
-}
-
-func removeFromArray(s []string, r string) []string {
-	for i, v := range s {
-		if v == r {
-			return append(s[:i], s[i+1:]...)
+		if strings.Contains(v, "mr-tmp") { // skips known directory
+			log.Printf("[Coordinator] Skipping %q as a intermediate file.", v)
+		} else {
+			intermediateFilesArray[i] = filepath.Base(v)
 		}
 	}
-	return s
+	//log.Printf("[Coordinator] Intermediate files found: %q", intermediateFilesArray)
+	return intermediateFilesArray
 }
 
 // start a thread that listens for RPCs from worker.go
@@ -193,6 +230,8 @@ func (c *Coordinator) server() {
 // main/mrcoordinator.go calls Done() periodically to find out
 // if the entire job has finished.
 func (c *Coordinator) Done() bool {
+	mu.Lock()
+	defer mu.Unlock()
 	return done
 }
 

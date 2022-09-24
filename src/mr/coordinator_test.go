@@ -22,6 +22,11 @@ func TestEmptyFileList(t *testing.T) {
 	}
 }
 
+func TestRemoveReduceCounterFromFileName(t *testing.T) {
+	var newTaskName = removeReduceCounterFromFileName("mr-pg-being_ernest-3");
+	assert.Equal(t, "mr-pg-being_ernest", newTaskName)
+}
+
 func TestAssignTheFirstFile(t *testing.T) {
 	var files = [2]string{"pg-being_ernest.txt", "pg-dorian_grey.txt"}
 

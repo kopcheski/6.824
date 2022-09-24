@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
+	"github.com/google/uuid"
 )
 
 var intermediateFileNamePrefix = "mr-"
@@ -20,6 +22,8 @@ var nReduce int
 var fileRelativePath string
 
 var jobDone = false
+
+var workerId = ""
 
 // for sorting by key.
 type ByKey []KeyValue
@@ -43,17 +47,34 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
+func logMessage(message string, args ...string) {
+	var fmtMessage = ""
+	if (len(args) > 0 ) {
+		fmtMessage = fmt.Sprintf(message, args)
+	} else {
+		fmtMessage = message
+	}
+	log.Printf("[Worker-%s] %s", workerId, fmtMessage)
+}
+
 // main/mrworker.go calls this function.
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
-	log.Printf("[Worker] Started.")
+	if (workerId == "") {
+		workerId = uuid.New().String()
+		workerId = workerId[len(workerId)-5:]
+	}
+
+	logMessage("Started.")
 	for !jobDone {	
 		var reply = RequestTask()
 		fileRelativePath = reply.RelativePath
 		
 		if reply.TaskFileName == "" {
-			log.Panicf("[Worker] Coordinator did not send a task to this worker. Queue is over.")
+			log.Println("Coordinator did not send a task to this worker.")
+			time.Sleep(time.Duration(5) * time.Second)
+			continue
 		} 
 	
 		if reply.Map {
@@ -64,7 +85,7 @@ func Worker(mapf func(string, string) []KeyValue,
 	
 		FinishTask(reply.TaskFileName)
 	}
-	log.Printf("[Worker] Finished.")
+	logMessage("Finished.")
 }
 
 func reduceKeyValue(fileName string, reducef func(string, []string) string) {
@@ -73,7 +94,6 @@ func reduceKeyValue(fileName string, reducef func(string, []string) string) {
 	}
 
 	kva := readIntermediateFileToKeyValue(fileName)
-	log.Printf("[Worker] %q has %d entries.", fileName, len(kva))
 
 	oname := "mr-out-0"
 	ofile, err := os.Create(oname)
@@ -97,7 +117,7 @@ func reduceKeyValue(fileName string, reducef func(string, []string) string) {
 			fmt.Fprintf(ofile, "%v %v\n", v.Key, reduced)
 		}
 	}
-	log.Printf("[Worker] Finished reducing the file %q.", fileName)
+	logMessage("Finished reducing the file %q.", fileName)
 	var errRemove = os.Remove(filepath.Join(fileRelativePath, fileName))
 	if errRemove != nil {
 		log.Panic(errRemove)
@@ -145,9 +165,9 @@ func writeToIntermediateFiles(intermediateMap map[int][]KeyValue, fileNamePrefix
 		ofile, _ := os.Create(oname)
 
 		if err != nil {
-			fmt.Printf("[Worker] Error: %s", err.Error())
+			logMessage("Error: %s", err.Error())
 		} else {
-			log.Printf("[Worker] Writing file %q", oname)
+			logMessage("Writing file %q", oname)
 			fmt.Fprintf(ofile, "%v\n", string(jsonStr))
 		}
 
@@ -176,11 +196,11 @@ func readFileToString(fileName string) string {
 	var fileNameWithPath = filepath.Join(fileRelativePath, fileName)
 	file, err := os.Open(fileNameWithPath)
 	if err != nil {
-		log.Fatalf("[Worker] cannot open %v", fileNameWithPath)
+		logMessage("cannot open %v", fileNameWithPath)
 	}
 	content, err := ioutil.ReadAll(file)
 	if err != nil {
-		log.Fatalf("[Worker] cannot read %v", fileNameWithPath)
+		logMessage("cannot read %v", fileNameWithPath)
 	}
 	file.Close()
 	return string(content)
@@ -203,21 +223,23 @@ func RequestTask() CoordinatorReply {
 	ok := call("Coordinator.Example", &args, &reply)
 	if ok {
 		nReduce = reply.NReduceTasks
-		log.Printf("[Worker] Got task %v to process.\n", reply.TaskFileName)
+		logMessage("Got task %v to process.", reply.TaskFileName)
 	} else {
-		log.Panic("[Worker] call failed!\n")
+		log.Panicf("[Worker-%s] call failed!\n", workerId)
 	}
 	return reply
 
 }
 
 func FinishTask(taskName string) {
+	logMessage("Finished processing %q, notifying coordinator.", taskName)
 	args := WorkerArgs{taskName}
 	reply := CoordinatorReply{}
 	ok := call("Coordinator.FinishTask", &args, &reply)
 	if !ok {
-		log.Panic("[Worker] call to FinishTask failed!\n")
+		log.Panicf("[Worker-%s] call to FinishTask failed!\n", workerId)
 	}
+	logMessage("Coordinator notified about %q.", taskName)
 	jobDone = reply.JobDone
 }
 
@@ -229,7 +251,7 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 	sockname := coordinatorSock()
 	c, err := rpc.DialHTTP("unix", sockname)
 	if err != nil {
-		log.Fatal("[Worker] dialing:", err)
+		log.Fatal(fmt.Sprintf("[Worker-%s] dialing:", workerId), err)
 	}
 	defer c.Close()
 
