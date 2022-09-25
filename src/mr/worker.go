@@ -72,7 +72,7 @@ func Worker(mapf func(string, string) []KeyValue,
 		fileRelativePath = reply.RelativePath
 		
 		if reply.TaskFileName == "" {
-			log.Println("Coordinator did not send a task to this worker.")
+			logMessage("Coordinator did not send a task to this worker.")
 			time.Sleep(time.Duration(5) * time.Second)
 			continue
 		} 
@@ -80,6 +80,7 @@ func Worker(mapf func(string, string) []KeyValue,
 		if reply.Map {
 			mapTextToKeyValue(reply.TaskFileName, mapf)
 		} else {
+			// FIXME map files are ending up here.
 			reduceKeyValue(reply.TaskFileName, reducef)
 		} 
 	
@@ -118,10 +119,10 @@ func reduceKeyValue(fileName string, reducef func(string, []string) string) {
 		}
 	}
 	logMessage("Finished reducing the file %q.", fileName)
-	var errRemove = os.Remove(filepath.Join(fileRelativePath, fileName))
-	if errRemove != nil {
-		log.Panic(errRemove)
-	}
+	// var errRemove = os.Remove(filepath.Join(fileRelativePath, fileName))
+	// if errRemove != nil {
+	// 	log.Panic(errRemove)
+	// }
 }
 
 func readIntermediateFileToKeyValue(fileName string) []KeyValue {

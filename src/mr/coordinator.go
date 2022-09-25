@@ -185,6 +185,10 @@ func isProcessed(taskName string) bool {
 
 func removeReduceCounterFromFileName(taskName string) string {
 	var lastDash = strings.LastIndexByte(taskName, '-') 
+	if (lastDash == -1) {
+		log.Printf("[Coordinator] No dashes found in %q.", taskName)
+		return taskName
+	}
 	return taskName[:lastDash]
 }
 
