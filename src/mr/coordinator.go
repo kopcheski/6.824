@@ -100,6 +100,7 @@ func assignTask(args WorkerArgs) string {
 	} 
 	
 	if isThereTaskBeingProcessed() {
+		log.Println("[Coordinator] Queue is empty but there are tasks being processed.")
 		return ""
 	} else {
 		log.Println("[Coordinator] No more files to assign.")
@@ -115,6 +116,10 @@ func markDone() {
 func nextAvailableTask(args WorkerArgs) string {
 	var fileName = tasksQueue[0]
 	tasksQueue = tasksQueue[1:]
+	if fileName == "" {
+		log.Println("[Coordinator] Queue is empty. Sending \"\" to worker with no extra control.")
+		return fileName
+	}
 	assignedTaskStatus[fileName] = Processing
 
 	go func() {
@@ -122,7 +127,7 @@ func nextAvailableTask(args WorkerArgs) string {
 
 		mu.Lock()
 		defer mu.Unlock()
-		log.Printf("Checking for potential timed out task %q. Current status is %v", fileName, assignedTaskStatus[fileName])
+		//log.Printf("[Coordinator] Checking for potential timed out task %q. Current status is %v", fileName, assignedTaskStatus[fileName])
 		if assignedTaskStatus[fileName] == Processing {
 			assignedTaskStatus[fileName] = TimedOut
 			tasksQueue = append(tasksQueue, fileName)

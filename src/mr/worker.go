@@ -47,7 +47,7 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
-func logMessage(message string, args ...string) {
+func logMessage(message string, args ...any) {
 	var fmtMessage = ""
 	if (len(args) > 0 ) {
 		fmtMessage = fmt.Sprintf(message, args)
@@ -80,7 +80,6 @@ func Worker(mapf func(string, string) []KeyValue,
 		if reply.Map {
 			mapTextToKeyValue(reply.TaskFileName, mapf)
 		} else {
-			// FIXME map files are ending up here.
 			reduceKeyValue(reply.TaskFileName, reducef)
 		} 
 	
@@ -96,7 +95,7 @@ func reduceKeyValue(fileName string, reducef func(string, []string) string) {
 
 	kva := readIntermediateFileToKeyValue(fileName)
 
-	oname := "mr-out-0"
+	oname := fmt.Sprintf("mr-out-%s", fileName)
 	ofile, err := os.Create(oname)
 	if (err != nil) {
 		log.Panic(err)
@@ -112,10 +111,13 @@ func reduceKeyValue(fileName string, reducef func(string, []string) string) {
 		if previousKey == v.Key {
 			toReduce = append(toReduce, v.Key)
 		} else {
+			if len(toReduce) == 0 {
+				continue
+			}
 			reduced := reducef(fileName, toReduce)
+			fmt.Fprintf(ofile, "%v %v\n", previousKey, reduced)
 			previousKey = v.Key
 			toReduce = nil
-			fmt.Fprintf(ofile, "%v %v\n", v.Key, reduced)
 		}
 	}
 	logMessage("Finished reducing the file %q.", fileName)
@@ -162,17 +164,20 @@ func writeToIntermediateFiles(intermediateMap map[int][]KeyValue, fileNamePrefix
 		jsonStr, err := json.Marshal(element)
 
 		var fileName = fileNamePrefix + "-" + fmt.Sprint(key) + ".txt"
-		oname := filepath.Join(fileRelativePath, fileName)
-		ofile, _ := os.Create(oname)
+		var oname = filepath.Join(fileRelativePath, fileName)
+		var tempFileName = fmt.Sprintf("%s-%d", oname, time.Now().Unix())
+		var tempFile, _ = os.Create(tempFileName)
+	
 
 		if err != nil {
 			logMessage("Error: %s", err.Error())
 		} else {
 			logMessage("Writing file %q", oname)
-			fmt.Fprintf(ofile, "%v\n", string(jsonStr))
+			fmt.Fprintf(tempFile, "%v\n", string(jsonStr))
 		}
 
-		ofile.Close()
+		tempFile.Close()
+		os.Rename(tempFileName, oname)
 	}
 
 }
@@ -185,9 +190,8 @@ func sortMap(intermediateMap map[int][]KeyValue) {
 
 func splitIntoBuckets(kva []KeyValue) map[int][]KeyValue {
 	var intermediateMap = make(map[int][]KeyValue)
-
-	for key, element := range kva {
-		var nReduceKey = ihash(fmt.Sprint(key)) % nReduce
+	for _, element := range kva {
+		var nReduceKey = ihash(fmt.Sprint(element.Key)) % nReduce
 		intermediateMap[nReduceKey] = append(intermediateMap[nReduceKey], element)
 	}
 	return intermediateMap

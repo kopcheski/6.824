@@ -1,6 +1,6 @@
 module 6.824
 
-go 1.15
+go 1.18
 
 require (
 	github.com/cilium/ebpf v0.9.1 // indirect
