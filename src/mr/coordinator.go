@@ -43,16 +43,10 @@ var nFilesProcessed int
 type Coordinator struct {
 }
 
-// Your code here -- RPC handlers for the worker to call.
-
-// an example RPC handler.
-//
-// the RPC argument and reply types are defined in rpc.go.
 func (c *Coordinator) Example(args *WorkerArgs, reply *CoordinatorReply) error {
 	mu.Lock()
 	defer mu.Unlock()
 
-	//log.Printf("[Coordinator] %d/%d tasks processed.", nFilesProcessed, nFilesToProcess)
 	if done {
 		reply.TaskFileName = ""
 		return nil
@@ -72,19 +66,13 @@ func (c *Coordinator) FinishTask(args *WorkerArgs, reply *CoordinatorReply) erro
 
 	var taskName = args.TaskFileName
 	log.Printf("[Coordinator] Received request to finish task %q.", taskName)
-	//if isProcessed(taskName) { WHY NOT TO TRUST THE WORKER?
-		markAsProcessed(taskName)
-	//} else {
-	//	log.Printf("[Coordinator] Task %q was requested to be removed from the queue, but it is not processed yet.\n", taskName)
-	//}
+	markAsProcessed(taskName)
 	reply.JobDone = done
 
 	return nil
 }
 
 func assignTask(args WorkerArgs) string {
-
-	//removeProcessedTasksFromQueue()
 
 	allMapTasksProcessed := isAllTasksProcessed() && !reduceTasksStarted
 	if allMapTasksProcessed {
@@ -127,7 +115,6 @@ func nextAvailableTask(args WorkerArgs) string {
 
 		mu.Lock()
 		defer mu.Unlock()
-		//log.Printf("[Coordinator] Checking for potential timed out task %q. Current status is %v", fileName, assignedTaskStatus[fileName])
 		if assignedTaskStatus[fileName] == Processing {
 			assignedTaskStatus[fileName] = TimedOut
 			tasksQueue = append(tasksQueue, fileName)
@@ -138,14 +125,6 @@ func nextAvailableTask(args WorkerArgs) string {
 	log.Printf("[Coordinator] %q will be assigned to a worker.\n", fileName)
 	return fileName
 }
-
-// func removeProcessedTasksFromQueue() {
-// 	for key := range assignedTaskStatus {
-// 		if isProcessed(key) {
-// 			markAsProcessed(key)
-// 		}
-// 	}
-// }
 
 func isAllTasksProcessed() bool {
 	var allProcessed = true
@@ -172,9 +151,6 @@ func isThereTaskBeingProcessed() bool {
 func markAsProcessed(taskName string) {
 	log.Printf("[Coordinator] Marking %q as processed.\n", taskName)
 	assignedTaskStatus[taskName] = Processed
-	// ==> FIXME assignTask already does that
-	// removeFromArray(tasksQueue, taskName) 
-	// log.Printf("[Coordinator] Task %q was processed. Removing it from queue.\n", taskName)
 	nFilesProcessed = nFilesProcessed + 1
 }
 
@@ -205,7 +181,6 @@ func findIntermediateFiles(taskName string) []string {
 	var fileNameWithoutExtension = strings.TrimSuffix(taskName, filepath.Ext(taskName))
 	var fileNamePattern = intermediatePrefix + fileNameWithoutExtension + "*"
 	var fileNamePatterWithPath = filepath.Join(relativePath, fileNamePattern)
-	//log.Printf("[Coordinator] Looking for intermediate files: %q", fileNamePatterWithPath)
 	files, err := filepath.Glob(fileNamePatterWithPath)
 	if err != nil {
 		panic(err)
@@ -218,7 +193,6 @@ func findIntermediateFiles(taskName string) []string {
 			intermediateFilesArray[i] = filepath.Base(v)
 		}
 	}
-	//log.Printf("[Coordinator] Intermediate files found: %q", intermediateFilesArray)
 	return intermediateFilesArray
 }
 
