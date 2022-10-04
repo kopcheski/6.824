@@ -196,7 +196,6 @@ func findIntermediateFiles(taskName string) []string {
 	var fileNameWithoutExtension = strings.TrimSuffix(taskName, filepath.Ext(taskName))
 	var fileNamePattern = intermediatePrefix + fileNameWithoutExtension + "*"
 	var fileNamePatterWithPath = filepath.Join(relativePath, fileNamePattern)
-	// logMessage("Searching for file with the expression: %q", fileNamePatterWithPath)
 	files, err := filepath.Glob(fileNamePatterWithPath)
 	if err != nil {
 		panic(err)

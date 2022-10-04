@@ -47,30 +47,6 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
-// func logMessage(message string, args ...any) {
-// 	// fmtMessage := formatMessage(message, args)
-// 	// log.Printf("[Worker-%s] %s", workerId, fmtMessage)
-// }
-
-// func logPanic(message string, args ...any) {
-// 	fmtMessage := formatMessage(message, args)
-// 	log.Panicf("[Worker-%s] %s", workerId, fmtMessage)
-// }
-
-// func logPanicNoArg(message any) {
-// 	log.Panicf("[Worker-%s] %s", workerId, message)
-// }
-
-// func formatMessage(message string, args []any) string {
-// 	var fmtMessage = ""
-// 	if len(args) > 0 {
-// 		fmtMessage = fmt.Sprintf(message, args)
-// 	} else {
-// 		fmtMessage = message
-// 	}
-// 	return fmtMessage
-// }
-
 // main/mrworker.go calls this function.
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
@@ -80,13 +56,11 @@ func Worker(mapf func(string, string) []KeyValue,
 		workerId = workerId[len(workerId)-5:]
 	}
 
-	// logMessage("Started.")
 	for !jobDone {
 		var reply = RequestTask()
 		fileRelativePath = reply.RelativePath
 
 		if len(reply.TaskFileNames) == 0 {
-			// logMessage("Coordinator did not send a task to this worker.")
 			time.Sleep(time.Duration(5) * time.Second)
 			continue
 		}
@@ -99,7 +73,6 @@ func Worker(mapf func(string, string) []KeyValue,
 
 		FinishTask(reply.TaskFileNames)
 	}
-	// logMessage("Finished.")
 }
 
 func reduceKeyValue(fileNames []string, reducef func(string, []string) string) {
@@ -143,7 +116,6 @@ func reduceKeyValue(fileNames []string, reducef func(string, []string) string) {
 
 	tempFile.Close()
 	os.Rename(tempFileName, outputFileName)
-	// logMessage("Finished reducing the file %q.", fileNames)
 }
 
 func getNReduceFromFileName(fileName string) int {
@@ -158,7 +130,7 @@ func readIntermediateFilesToKeyValue(fileNames []string) []KeyValue {
 		var fileNameWithPath = filepath.Join(fileRelativePath, fileName)
 		var bytes, err = os.ReadFile(fileNameWithPath)
 		if err != nil {
-			// logPanicNoArg(err)
+			log.Panic(err)
 		}
 
 		var fileContent = string(bytes)
@@ -200,9 +172,8 @@ func writeToIntermediateFiles(intermediateMap map[int][]KeyValue, fileNamePrefix
 		var tempFile, _ = os.Create(tempFileName)
 
 		if err != nil {
-			// logMessage("Error: %s", err.Error())
+			log.Printf("Error: %s", err.Error())
 		} else {
-			// logMessage("Writing file %q", oname)
 			fmt.Fprintf(tempFile, "%v\n", string(jsonStr))
 		}
 
@@ -231,11 +202,11 @@ func readFileToString(fileName string) string {
 	var fileNameWithPath = filepath.Join(fileRelativePath, fileName)
 	file, err := os.Open(fileNameWithPath)
 	if err != nil {
-		// logMessage("cannot open %v", fileNameWithPath)
+		log.Printf("cannot open %v", fileNameWithPath)
 	}
 	content, err := ioutil.ReadAll(file)
 	if err != nil {
-		// logMessage("cannot read %v", fileNameWithPath)
+		log.Printf("cannot read %v", fileNameWithPath)
 	}
 	file.Close()
 	return string(content)
@@ -258,23 +229,20 @@ func RequestTask() CoordinatorReply {
 	ok := call("Coordinator.Example", &args, &reply)
 	if ok {
 		nReduce = reply.NReduceTasks
-		// logMessage("Got tasks %v to process.", reply.TaskFileNames)
 	} else {
-		// logPanic("[Worker-%s] call failed!\n", workerId)
+		log.Panicf("[Worker-%s] call failed!\n", workerId)
 	}
 	return reply
 
 }
 
 func FinishTask(taskNames []string) {
-	// logMessage("Finished processing %q, notifying coordinator.", taskNames)
 	args := WorkerArgs{taskNames}
 	reply := CoordinatorReply{}
 	ok := call("Coordinator.FinishTask", &args, &reply)
 	if !ok {
 		log.Panicf("[Worker-%s] call to FinishTask failed!\n", workerId)
 	}
-	// logMessage("Coordinator notified about %q.", taskNames)
 	jobDone = reply.JobDone
 }
 
