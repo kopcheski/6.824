@@ -3,19 +3,19 @@ package mr
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/google/uuid"
 	"hash/fnv"
 	"io/ioutil"
 	"log"
 	"net/rpc"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
-	"github.com/google/uuid"
 )
-
-var intermediateFileNamePrefix = "mr-"
 
 var nReduce int
 
@@ -47,60 +47,75 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
-func logMessage(message string, args ...any) {
-	var fmtMessage = ""
-	if (len(args) > 0 ) {
-		fmtMessage = fmt.Sprintf(message, args)
-	} else {
-		fmtMessage = message
-	}
-	log.Printf("[Worker-%s] %s", workerId, fmtMessage)
-}
+// func logMessage(message string, args ...any) {
+// 	// fmtMessage := formatMessage(message, args)
+// 	// log.Printf("[Worker-%s] %s", workerId, fmtMessage)
+// }
+
+// func logPanic(message string, args ...any) {
+// 	fmtMessage := formatMessage(message, args)
+// 	log.Panicf("[Worker-%s] %s", workerId, fmtMessage)
+// }
+
+// func logPanicNoArg(message any) {
+// 	log.Panicf("[Worker-%s] %s", workerId, message)
+// }
+
+// func formatMessage(message string, args []any) string {
+// 	var fmtMessage = ""
+// 	if len(args) > 0 {
+// 		fmtMessage = fmt.Sprintf(message, args)
+// 	} else {
+// 		fmtMessage = message
+// 	}
+// 	return fmtMessage
+// }
 
 // main/mrworker.go calls this function.
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
-	if (workerId == "") {
+	if workerId == "" {
 		workerId = uuid.New().String()
 		workerId = workerId[len(workerId)-5:]
 	}
 
-	logMessage("Started.")
-	for !jobDone {	
+	// logMessage("Started.")
+	for !jobDone {
 		var reply = RequestTask()
 		fileRelativePath = reply.RelativePath
-		
-		if reply.TaskFileName == "" {
-			logMessage("Coordinator did not send a task to this worker.")
+
+		if len(reply.TaskFileNames) == 0 {
+			// logMessage("Coordinator did not send a task to this worker.")
 			time.Sleep(time.Duration(5) * time.Second)
 			continue
-		} 
-	
+		}
+
 		if reply.Map {
-			mapTextToKeyValue(reply.TaskFileName, mapf)
+			mapTextToKeyValue(reply.TaskFileNames[0], mapf)
 		} else {
-			reduceKeyValue(reply.TaskFileName, reducef)
-		} 
-	
-		FinishTask(reply.TaskFileName)
+			reduceKeyValue(reply.TaskFileNames, reducef)
+		}
+
+		FinishTask(reply.TaskFileNames)
 	}
-	logMessage("Finished.")
+	// logMessage("Finished.")
 }
 
-func reduceKeyValue(fileName string, reducef func(string, []string) string) {
-	if len(fileName) == 0 {
+func reduceKeyValue(fileNames []string, reducef func(string, []string) string) {
+	if len(fileNames) == 0 {
 		return
 	}
 
-	kva := readIntermediateFileToKeyValue(fileName)
+	kva := readIntermediateFilesToKeyValue(fileNames)
+	var tempMap = make(map[int][]KeyValue)
+	tempMap[0] = kva
+	sortMap(tempMap)
 
-	oname := fmt.Sprintf("mr-out-%s", fileName)
-	ofile, err := os.Create(oname)
-	if (err != nil) {
-		log.Panic(err)
-	}
-	defer ofile.Close()
+	var index = getNReduceFromFileName(fileNames[0])
+	outputFileName := fmt.Sprintf("mr-out-%d", index)
+	var tempFileName = fmt.Sprintf("%s-%d", outputFileName, time.Now().Unix())
+	var tempFile, _ = os.Create(tempFileName)
 
 	var toReduce []string
 	var previousKey string
@@ -108,37 +123,49 @@ func reduceKeyValue(fileName string, reducef func(string, []string) string) {
 		if i == 0 {
 			previousKey = v.Key
 		}
-		if previousKey == v.Key {
+		if previousKey == v.Key { // can be simplified
 			toReduce = append(toReduce, v.Key)
 		} else {
 			if len(toReduce) == 0 {
 				continue
 			}
-			reduced := reducef(fileName, toReduce)
-			fmt.Fprintf(ofile, "%v %v\n", previousKey, reduced)
+			reduced := reducef("does it matter?", toReduce)
+			fmt.Fprintf(tempFile, "%v %v\n", previousKey, reduced)
 			previousKey = v.Key
 			toReduce = nil
+			toReduce = append(toReduce, v.Key)
 		}
 	}
-	logMessage("Finished reducing the file %q.", fileName)
-	// var errRemove = os.Remove(filepath.Join(fileRelativePath, fileName))
-	// if errRemove != nil {
-	// 	log.Panic(errRemove)
-	// }
+
+	tempFile.Close()
+	os.Rename(tempFileName, outputFileName)
+	// logMessage("Finished reducing the file %q.", fileNames)
 }
 
-func readIntermediateFileToKeyValue(fileName string) []KeyValue {
-	var fileNameWithPath = filepath.Join(fileRelativePath, fileName)
-	var bytes, err = ioutil.ReadFile(fileNameWithPath)
-	if (err != nil) {
-		log.Panic(err)
-	}
+func getNReduceFromFileName(fileName string) int {
+	r, _ := regexp.Compile("[\\d]")
+	var nReduceIndex, _ = strconv.Atoi(r.FindString(fileName))
+	return nReduceIndex
+}
 
-	var fileContent = string(bytes)
-	jsonArray := []KeyValue{}
- 
-    json.Unmarshal([]byte(fileContent), &jsonArray)
-	return jsonArray
+func readIntermediateFilesToKeyValue(fileNames []string) []KeyValue {
+	jsonArrayAll := []KeyValue{}
+	for _, fileName := range fileNames {
+		var fileNameWithPath = filepath.Join(fileRelativePath, fileName)
+		var bytes, err = os.ReadFile(fileNameWithPath)
+		if err != nil {
+			// logPanicNoArg(err)
+		}
+
+		var fileContent = string(bytes)
+
+		jsonArray := []KeyValue{}
+		json.Unmarshal([]byte(fileContent), &jsonArray)
+		for _, v := range jsonArray {
+			jsonArrayAll = append(jsonArrayAll, v)
+		}
+	}
+	return jsonArrayAll
 }
 
 func mapTextToKeyValue(fileName string, mapf func(string, string) []KeyValue) {
@@ -155,7 +182,7 @@ func mapTextToKeyValue(fileName string, mapf func(string, string) []KeyValue) {
 	sortMap(intermediateMap)
 
 	var b, _, _ = strings.Cut(fileName, ".txt")
-	var fileNamePrefix = intermediateFileNamePrefix + b
+	var fileNamePrefix = "mr-" + b
 	writeToIntermediateFiles(intermediateMap, fileNamePrefix)
 }
 
@@ -167,12 +194,11 @@ func writeToIntermediateFiles(intermediateMap map[int][]KeyValue, fileNamePrefix
 		var oname = filepath.Join(fileRelativePath, fileName)
 		var tempFileName = fmt.Sprintf("%s-%d", oname, time.Now().Unix())
 		var tempFile, _ = os.Create(tempFileName)
-	
 
 		if err != nil {
-			logMessage("Error: %s", err.Error())
+			// logMessage("Error: %s", err.Error())
 		} else {
-			logMessage("Writing file %q", oname)
+			// logMessage("Writing file %q", oname)
 			fmt.Fprintf(tempFile, "%v\n", string(jsonStr))
 		}
 
@@ -201,11 +227,11 @@ func readFileToString(fileName string) string {
 	var fileNameWithPath = filepath.Join(fileRelativePath, fileName)
 	file, err := os.Open(fileNameWithPath)
 	if err != nil {
-		logMessage("cannot open %v", fileNameWithPath)
+		// logMessage("cannot open %v", fileNameWithPath)
 	}
 	content, err := ioutil.ReadAll(file)
 	if err != nil {
-		logMessage("cannot read %v", fileNameWithPath)
+		// logMessage("cannot read %v", fileNameWithPath)
 	}
 	file.Close()
 	return string(content)
@@ -228,23 +254,23 @@ func RequestTask() CoordinatorReply {
 	ok := call("Coordinator.Example", &args, &reply)
 	if ok {
 		nReduce = reply.NReduceTasks
-		logMessage("Got task %v to process.", reply.TaskFileName)
+		// logMessage("Got tasks %v to process.", reply.TaskFileNames)
 	} else {
-		log.Panicf("[Worker-%s] call failed!\n", workerId)
+		// logPanic("[Worker-%s] call failed!\n", workerId)
 	}
 	return reply
 
 }
 
-func FinishTask(taskName string) {
-	logMessage("Finished processing %q, notifying coordinator.", taskName)
-	args := WorkerArgs{taskName}
+func FinishTask(taskNames []string) {
+	// logMessage("Finished processing %q, notifying coordinator.", taskNames)
+	args := WorkerArgs{taskNames}
 	reply := CoordinatorReply{}
 	ok := call("Coordinator.FinishTask", &args, &reply)
 	if !ok {
 		log.Panicf("[Worker-%s] call to FinishTask failed!\n", workerId)
 	}
-	logMessage("Coordinator notified about %q.", taskName)
+	// logMessage("Coordinator notified about %q.", taskNames)
 	jobDone = reply.JobDone
 }
 

@@ -20,9 +20,9 @@ func TestSplitIntoBuckets(t *testing.T) {
 	intermediate[2] = KeyValue{"boat", "1"}
 
 	nReduceTasks = 2
-	var intemediateMap = splitIntoBuckets(intermediate[:])
+	var intermediateMap = splitIntoBuckets(intermediate[:])
 
-	assert.Equal(t, nReduceTasks, len(intemediateMap))
+	assert.Equal(t, nReduceTasks, len(intermediateMap))
 }
 
 func TestSortMap(t *testing.T) {
@@ -74,7 +74,8 @@ func TestWriteAndReadIntermediateFile(t *testing.T) {
 	intermediateMap[0] = []KeyValue{{"A", "1"}, {"B", "1"}}
 
 	writeToIntermediateFiles(intermediateMap, prefix)
-	var kva = readIntermediateFileToKeyValue(prefix + "-0.txt")
+	var files = []string{prefix + "-0.txt"}
+	var kva = readIntermediateFilesToKeyValue(files)
 
 	assert.Equal(t, intermediateMap[0], kva)
 }

@@ -25,7 +25,7 @@ type ExampleReply struct {
 }
 
 type CoordinatorReply struct {
-	TaskFileName string
+	TaskFileNames []string
 	NReduceTasks int
 	Map bool
 	RelativePath string
@@ -33,7 +33,7 @@ type CoordinatorReply struct {
 }
 
 type WorkerArgs struct {
-	TaskFileName string
+	TaskFileNames []string
 }
 
 // Add your RPC definitions here.

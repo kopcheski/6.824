@@ -7,6 +7,8 @@ import (
 	"net/rpc"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,7 +24,9 @@ const (
 	Processed
 )
 
-var tasksQueue []string
+var intermediateFileNamePrefix = "mr-"
+
+var tasksQueue [][]string
 
 var reduceTasksStarted = false
 
@@ -48,11 +52,11 @@ func (c *Coordinator) Example(args *WorkerArgs, reply *CoordinatorReply) error {
 	defer mu.Unlock()
 
 	if done {
-		reply.TaskFileName = ""
+		reply.TaskFileNames = []string{}
 		return nil
 	}
 
-	reply.TaskFileName = assignTask(WorkerArgs{})
+	reply.TaskFileNames = assignTask(WorkerArgs{})
 	reply.NReduceTasks = nReduceTasks
 	reply.Map = !reduceTasksStarted
 	reply.RelativePath = relativePath
@@ -64,19 +68,20 @@ func (c *Coordinator) FinishTask(args *WorkerArgs, reply *CoordinatorReply) erro
 	mu.Lock()
 	defer mu.Unlock()
 
-	var taskName = args.TaskFileName
-	log.Printf("[Coordinator] Received request to finish task %q.", taskName)
-	markAsProcessed(taskName)
+	var taskNames = args.TaskFileNames
+	log.Printf("[Coordinator] Received request to finish task %q.", taskNames)
+	markAsProcessed(taskNames[0])
 	reply.JobDone = done
 
 	return nil
 }
 
-func assignTask(args WorkerArgs) string {
+func assignTask(args WorkerArgs) []string {
 
 	allMapTasksProcessed := isAllTasksProcessed() && !reduceTasksStarted
 	if allMapTasksProcessed {
-		tasksQueue = findIntermediateFiles("")
+		var intermediateFiles = findIntermediateFiles("pg")
+		tasksQueue = groupIntermediateFiles(intermediateFiles)
 		reduceTasksStarted = true
 		assignedTaskStatus = make(map[string]TaskStatus)
 		log.Println("[Coordinator] All map tasks are finished.")
@@ -84,46 +89,56 @@ func assignTask(args WorkerArgs) string {
 	}
 
 	if len(tasksQueue) > 0 {
-		return nextAvailableTask(args)
-	} 
-	
-	if isThereTaskBeingProcessed() {
+		return nextAvailableTasks(args)
+	}
+
+	if areThereTasksBeingProcessed() {
 		log.Println("[Coordinator] Queue is empty but there are tasks being processed.")
-		return ""
+		return []string{}
 	} else {
 		log.Println("[Coordinator] No more files to assign.")
 		markDone()
-		return ""
+		return []string{}
 	}
+}
+
+func groupIntermediateFiles(files []string) [][]string {
+	var queue = make([][]string, nReduceTasks)
+	for _, fileName := range files {
+		r, _ := regexp.Compile("[\\d]")
+		var nReduceIndex, _ = strconv.Atoi(r.FindString(fileName))
+		queue[nReduceIndex] = append(queue[nReduceIndex], fileName)
+	}
+	return queue
 }
 
 func markDone() {
 	done = true
 }
 
-func nextAvailableTask(args WorkerArgs) string {
-	var fileName = tasksQueue[0]
+func nextAvailableTasks(args WorkerArgs) []string {
+	var fileNames = tasksQueue[0]
 	tasksQueue = tasksQueue[1:]
-	if fileName == "" {
+	if len(fileNames) == 0 {
 		log.Println("[Coordinator] Queue is empty. Sending \"\" to worker with no extra control.")
-		return fileName
+		return []string{}
 	}
-	assignedTaskStatus[fileName] = Processing
+	assignedTaskStatus[fileNames[0]] = Processing
 
 	go func() {
 		time.Sleep(timeout)
 
 		mu.Lock()
 		defer mu.Unlock()
-		if assignedTaskStatus[fileName] == Processing {
-			assignedTaskStatus[fileName] = TimedOut
-			tasksQueue = append(tasksQueue, fileName)
-			log.Printf("[Coordinator] The completion of %q task has just timed out. It is back to the queue.\n", fileName)
+		if assignedTaskStatus[fileNames[0]] == Processing {
+			assignedTaskStatus[fileNames[0]] = TimedOut
+			tasksQueue = append(tasksQueue, fileNames)
+			log.Printf("[Coordinator] The completion of %q task has just timed out. It is back to the queue.\n", fileNames)
 		}
 	}()
 
-	log.Printf("[Coordinator] %q will be assigned to a worker.\n", fileName)
-	return fileName
+	log.Printf("[Coordinator] %q will be assigned to a worker.\n", fileNames)
+	return fileNames
 }
 
 func isAllTasksProcessed() bool {
@@ -137,7 +152,7 @@ func isAllTasksProcessed() bool {
 	return allProcessed && len(assignedTaskStatus) > 0
 }
 
-func isThereTaskBeingProcessed() bool {
+func areThereTasksBeingProcessed() bool {
 	var processing = false
 	for key := range assignedTaskStatus {
 		if assignedTaskStatus[key] == Processing {
@@ -155,7 +170,7 @@ func markAsProcessed(taskName string) {
 }
 
 func isProcessed(taskName string) bool {
-	if (reduceTasksStarted) {
+	if reduceTasksStarted {
 		var processedTasks = findIntermediateFiles(removeReduceCounterFromFileName(taskName))
 		return len(processedTasks) == 0
 	} else {
@@ -165,8 +180,8 @@ func isProcessed(taskName string) bool {
 }
 
 func removeReduceCounterFromFileName(taskName string) string {
-	var lastDash = strings.LastIndexByte(taskName, '-') 
-	if (lastDash == -1) {
+	var lastDash = strings.LastIndexByte(taskName, '-')
+	if lastDash == -1 {
 		log.Printf("[Coordinator] No dashes found in %q.", taskName)
 		return taskName
 	}
@@ -175,12 +190,13 @@ func removeReduceCounterFromFileName(taskName string) string {
 
 func findIntermediateFiles(taskName string) []string {
 	var intermediatePrefix = intermediateFileNamePrefix
-	if (strings.HasPrefix(taskName, intermediateFileNamePrefix)) {
+	if strings.HasPrefix(taskName, intermediateFileNamePrefix) {
 		intermediatePrefix = "" //smelly, but to avoid unwanted files to be found
 	}
 	var fileNameWithoutExtension = strings.TrimSuffix(taskName, filepath.Ext(taskName))
 	var fileNamePattern = intermediatePrefix + fileNameWithoutExtension + "*"
 	var fileNamePatterWithPath = filepath.Join(relativePath, fileNamePattern)
+	// logMessage("Searching for file with the expression: %q", fileNamePatterWithPath)
 	files, err := filepath.Glob(fileNamePatterWithPath)
 	if err != nil {
 		panic(err)
@@ -224,13 +240,14 @@ func (c *Coordinator) Done() bool {
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{}
 
+	tasksQueue = make([][]string, len(files))
 	relativePath = filepath.Dir(files[0])
 	nReduceTasks = nReduce
-	for _, v := range files {
-		tasksQueue = append(tasksQueue, filepath.Base(v))
+	for i, v := range files {
+		tasksQueue[i] = append(tasksQueue[i], filepath.Base(v))
 	}
 
-	nFilesToProcess = len(files) * (nReduce + 1);
+	nFilesToProcess = len(files) * (nReduce + 1)
 
 	log.Printf("[Coordinator] Starting up coordinator with files: %s\n", files)
 	log.Printf("[Coordinator] Starting up coordinator for %d reduce tasks.", nReduceTasks)

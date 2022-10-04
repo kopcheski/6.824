@@ -2,7 +2,10 @@
 package mr
 
 import (
+	"fmt"
 	"os"
+	"regexp"
+	"strconv"
 	"testing"
 	"time"
 
@@ -10,32 +13,41 @@ import (
 )
 
 func TestEmptyFileList(t *testing.T) {
-	var files []string
+	var files [][]string
 
 	tasksQueue = files
 
 	var worker = WorkerArgs{}
 	var fileName = assignTask(worker)
 
-	if fileName != "" {
+	if len(fileName) > 0 {
 		t.Fatalf(`No file was expected. Got %q instead`, fileName)
 	}
 }
 
+func TestFromIntermediateToOutput(t *testing.T) {
+
+	var intermediate = []string{"mr-pg-being_ernest-0.txt"}
+
+	reduceKeyValue(intermediate, func(key string, values []string) string {
+		return strconv.Itoa(len(values))
+	})
+}
+
 func TestRemoveReduceCounterFromFileName(t *testing.T) {
-	var newTaskName = removeReduceCounterFromFileName("mr-pg-being_ernest-3");
-	assert.Equal(t, "mr-pg-being_ernest", newTaskName)
+	match, _ := regexp.MatchString("p([a-z]+)ch", "peach")
+	fmt.Println(match)
 }
 
 func TestAssignTheFirstFile(t *testing.T) {
-	var files = [2]string{"pg-being_ernest.txt", "pg-dorian_grey.txt"}
-
-	tasksQueue = files[0:2]
+	tasksQueue = make([][]string, 2)
+	tasksQueue[0] = append(tasksQueue[0], "pg-being_ernest.txt")
+	tasksQueue[1] = append(tasksQueue[1], "pg-dorian_grey.txt")
 
 	var worker = WorkerArgs{}
 	var fileName = assignTask(worker)
 
-	if fileName != "pg-being_ernest.txt" {
+	if fileName[0] != "pg-being_ernest.txt" {
 		t.Fatalf(`%q is not the expect file name`, fileName)
 	}
 }
@@ -44,13 +56,14 @@ func TestAssignAllFilesUntilThereAreNoMoreFilesLeft(t *testing.T) {
 	deleteFilesStartingWith(intermediateFileNamePrefix)
 	defer deleteFilesStartingWith(intermediateFileNamePrefix)
 
-	var files = [2]string{"pg-being_ernest.txt", "pg-dorian_grey.txt"}
-	tasksQueue = files[0:2]
+	tasksQueue = make([][]string, 2)
+	tasksQueue[0] = append(tasksQueue[0], "pg-being_ernest.txt")
+	tasksQueue[1] = append(tasksQueue[1], "pg-dorian_grey.txt")
 
 	var fileName1 = assignTask(WorkerArgs{})
-	createFile(intermediateFileNamePrefix + files[0])
+	createFile(intermediateFileNamePrefix + "pg-being_ernest.txt")
 	var fileName2 = assignTask(WorkerArgs{})
-	createFile(intermediateFileNamePrefix + files[1])
+	createFile(intermediateFileNamePrefix + "pg-dorian_grey.txt")
 	// starts assign reduce tasks
 	var fileName3 = assignTask(WorkerArgs{})
 	var fileName4 = assignTask(WorkerArgs{})
@@ -64,30 +77,34 @@ func TestAssignAllFilesUntilThereAreNoMoreFilesLeft(t *testing.T) {
 }
 
 func TestTaskGoesBackToQueueWhenExecutionTimesOut(t *testing.T) {
-	var files = [2]string{"pg-being_ernest.txt", "pg-dorian_grey.txt"}
+	var files = [2][1]string{}
+	files[0][0] = "pg-being_ernest.txt"
+	files[1][0] = "pg-dorian_grey.txt"
 
-	tasksQueue = files[0:2]
+	tasksQueue = make([][]string, 2)
+	tasksQueue[0] = append(tasksQueue[0], "pg-being_ernest.txt")
+	tasksQueue[1] = append(tasksQueue[1], "pg-dorian_grey.txt")
 
 	var fileName = assignTask(WorkerArgs{})
 	time.Sleep(timeout + (1 + time.Second))
 
-	assert.Equal(t, assignedTaskStatus[fileName], TimedOut)
+	assert.Equal(t, assignedTaskStatus[fileName[0]], TimedOut)
 	assert.ElementsMatch(t, files, tasksQueue)
 }
 
 func TestCoordinatorIsDoneWhenThereAreNoMoreTasksToProcess(t *testing.T) {
 	t.Skip("The current implementation of this Done is now invalid. Fix it.")
-	var files = [1]string{"pg-being_ernest.txt"}
-
-	tasksQueue = files[0:1]
-
-	var c = Coordinator{}
-	assert.False(t, c.Done())
-
-	var worker = WorkerArgs{}
-	assignTask(worker)
-
-	assert.True(t, c.Done())
+	//var files = [1]string{"pg-being_ernest.txt"}
+	//
+	//tasksQueue = files[0:1]
+	//
+	//var c = Coordinator{}
+	//assert.False(t, c.Done())
+	//
+	//var worker = WorkerArgs{}
+	//assignTask(worker)
+	//
+	//assert.True(t, c.Done())
 }
 
 func createFile(fileName string) {
