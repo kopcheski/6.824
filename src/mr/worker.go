@@ -119,6 +119,7 @@ func reduceKeyValue(fileNames []string, reducef func(string, []string) string) {
 
 	var toReduce []string
 	var previousKey string
+	var reduced string
 	for i, v := range kva {
 		if i == 0 {
 			previousKey = v.Key
@@ -129,13 +130,16 @@ func reduceKeyValue(fileNames []string, reducef func(string, []string) string) {
 			if len(toReduce) == 0 {
 				continue
 			}
-			reduced := reducef("does it matter?", toReduce)
+			reduced = reducef("does it matter?", toReduce)
 			fmt.Fprintf(tempFile, "%v %v\n", previousKey, reduced)
 			previousKey = v.Key
 			toReduce = nil
 			toReduce = append(toReduce, v.Key)
 		}
 	}
+	//prints final entry since the trigger will not happen
+	reduced = reducef("does it matter?", toReduce)
+	fmt.Fprintf(tempFile, "%v %v\n", previousKey, reduced)
 
 	tempFile.Close()
 	os.Rename(tempFileName, outputFileName)
