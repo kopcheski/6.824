@@ -19,7 +19,7 @@ package raft
 
 import (
 	//	"bytes"
-	"io/ioutil"
+	"io"
 	"log"
 	"math"
 	"math/rand"
@@ -33,7 +33,7 @@ import (
 	"github.com/sasha-s/go-deadlock"
 )
 
-var counterMutex sync.Mutex
+var logIndex int32
 
 type ServerState int
 
@@ -88,6 +88,9 @@ type Raft struct {
 	votedTerms    map[int]string
 	currentState  ServerState
 	lastPing      time.Time
+	applyCh       chan ApplyMsg
+	log           []ApplyMsg          // the state machine, for commited messages
+	tempLog       []ApplyMsg          // [ ] it is never cleaned up
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
@@ -104,10 +107,14 @@ func (rf *Raft) GetState() (int, bool) {
 	var isleader bool
 
 	term = rf.currentTerm
-	isleader = rf.me == rf.currentLeader
+	isleader = rf.amITheLeader()
 
 	log.Printf("Hey server %d, who is the leader? %d", rf.me, rf.currentLeader)
 	return term, isleader
+}
+
+func (rf *Raft) amITheLeader() bool {
+	return rf.me == rf.currentLeader
 }
 
 // save Raft's persistent state to stable storage,
@@ -187,6 +194,7 @@ type AppendEntriesArgs struct {
 	PrevLogTerm  int
 	Entries      []string
 	LeaderCommit int
+	Messages     []ApplyMsg
 }
 
 type AppendEntriesReply struct {
@@ -198,7 +206,9 @@ type AppendEntriesReply struct {
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	log.Printf("Server %d will vote for term %d.", rf.me, args.Term)
 	rf.mu.Lock()
-	defer rf.mu.Unlock() // it can also be starting an election itself
+	defer rf.mu.Unlock()
+	// [ ] it has to implement 5.4.1
+	// it can also be starting an election itself
 	// if rf.votedTerms[args.Term] == "voted" {
 	// 	reply.VoteGranted = false
 	// } else {
@@ -211,21 +221,35 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	if len(args.Entries) == 0 {
-		log.Printf("Server %d claims to be a leader for term %d.", args.LeaderId, args.Term)
-		if args.Term >= rf.currentTerm { // has to be in 'candidate' state too? pg6,3rd paragraph)
-			rf.currentState = follower
-			rf.currentLeader = args.LeaderId
-			rf.currentTerm = args.Term
-			log.Printf("Claim of server %d was accepted. Server %d becomes now %s.",
-				args.LeaderId, rf.me, rf.currentState)
-		} else {
-			log.Printf("Claim of server %d was declined.", args.LeaderId)
-			// not a valid term, ignoring invalid leader.
-		}
-		rf.lastPing = time.Now()
+	if (0 == len(args.Messages)) {
+		// has to be in 'candidate' state too? pg6,3rd paragraph)
+		// not a valid term, ignoring invalid leader.
+		rf.voteForElection(args)
 		return
+	} else {
+		for i, _ := range args.Messages {
+			rf.tempLog = append(rf.tempLog, args.Messages[i])
+		}
 	}
+
+	if (args.LeaderCommit > 0) {
+		rf.commitMessages(args.LeaderCommit)
+	}
+}
+
+func (rf *Raft) voteForElection(args *AppendEntriesArgs) {
+	log.Printf("Server %d claims to be a leader for term %d.", args.LeaderId, args.Term)
+	if args.Term >= rf.currentTerm {
+		rf.currentState = follower
+		rf.currentLeader = args.LeaderId
+		rf.currentTerm = args.Term
+		log.Printf("Claim of server %d was accepted. Server %d becomes now %s.",
+			args.LeaderId, rf.me, rf.currentState)
+	} else {
+		log.Printf("Claim of server %d was declined.", args.LeaderId)
+
+	}
+	rf.lastPing = time.Now()
 }
 
 func (rf *Raft) fireElection() {
@@ -262,7 +286,7 @@ func (rf *Raft) fireElection() {
 			}
 			totalVotesSoFar++
 
-			if rf.hasMajority(votesFor) {
+			if rf.isMajority(votesFor) {
 				rf.currentState = leader
 				cond.Broadcast()
 			} else if rf.isMajorityImpossible(votesFor, totalVotesSoFar) {
@@ -320,9 +344,9 @@ func (rf *Raft) claimAuthority() {
 	log.Printf("Server %d state is %s", rf.me, rf.currentState)
 }
 
-func (rf *Raft) hasMajority(votes int) bool {
-	log.Printf("Server %d got %d votes from %d voters.", rf.me, votes, len(rf.peers))
-	return votes >= rf.getMajority()
+func (rf *Raft) isMajority(occurrences int) bool {
+	log.Printf("Server %d got %d votes from %d voters.", rf.me, occurrences, len(rf.peers))
+	return occurrences >= rf.getMajority()
 }
 
 func (rf *Raft) isMajorityImpossible(votesPro int, votesSoFar int) bool {
@@ -387,12 +411,97 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 // the leader.
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index := -1
-	term := -1
-	isLeader := true
-
-	// Your code here (2B).
+	term := rf.currentTerm
+	isLeader := rf.amITheLeader()
+	if (isLeader) {
+		index = int(atomic.AddInt32(&logIndex, 1))
+		var msg = ApplyMsg{}
+		msg.Command = command
+		msg.CommandIndex = index
+		// WHAT GOES HERE? msg.CommandValid
+		rf.startAgreement(msg)
+	}
 
 	return index, term, isLeader
+}
+
+func (rf *Raft) startAgreement(msg ApplyMsg) {
+	log.Printf("[%d] - starting agreement of index %d.", rf.me, msg.CommandIndex)
+	rf.mu.Lock()
+	cond := sync.NewCond(&rf.mu)
+
+	rf.tempLog = append(rf.tempLog, msg)
+	var replicationCount = 1
+	for i := range rf.peers {
+		if i == rf.me {
+			continue
+		}
+		go func(peer int) {
+			log.Printf("[%d] - replicating command to %d.", rf.me, peer)
+			rf.replicateLog(peer, msg)
+			replicationCount++
+			cond.Broadcast()
+		}(i)
+	}
+	for !rf.isMajority(replicationCount) {
+		cond.Wait()
+	}
+	rf.commitMessages(msg.CommandIndex)
+	rf.mu.Unlock()
+	log.Printf("[%d] - has replicated its logs to most of servers.", rf.me)
+
+	go rf.replicateCommitToPeers(msg.CommandIndex)
+	// [x] how to ask peers to commit?
+          // - as above
+	// [x] apply to my state machine
+          // - done so when it goes to rf.log
+	// [x] it tries to replicate to all followers indefinitely,
+	// [x] but after replicating to the majority, it can then apply the change to its state machine.
+	// [x] Finally, it returns to the client
+}
+
+func (rf *Raft) replicateCommitToPeers(index int) {
+	for peer := range rf.peers {
+		if peer == rf.me {
+			continue
+		}
+		go rf.replicateCommit(peer, index)
+	}
+}
+
+func (rf *Raft) replicateCommit(peer int, index int) {
+	var reply = &AppendEntriesReply{}
+	var args = &AppendEntriesArgs{}
+	args.LeaderCommit = index
+	if !rf.sendAppendEntries(peer, args, reply) {
+		log.Printf("Server %d will retry replication of commit to server %d.", rf.me, peer)
+		rf.replicateCommit(peer, index)
+	}
+}
+
+func (rf *Raft) commitMessages(index int) {
+	for _, v := range rf.tempLog {
+		if v.CommandIndex <= index {
+			rf.log = append(rf.log, v)
+			v.CommandValid = true
+			rf.applyCh <- v
+		}
+	}
+}
+
+func (rf *Raft) replicateLog(peer int, msg ApplyMsg) {
+	// [x] AppendEntries to followers
+	var reply = &AppendEntriesReply{}
+	var args = &AppendEntriesArgs{}
+	args.LeaderCommit = msg.CommandIndex
+	args.LeaderId = rf.me
+	args.Term = rf.currentTerm
+	args.Messages = append(args.Messages, msg)
+	if (!rf.sendAppendEntries(peer, args, reply)) {
+		log.Printf("Server %d will retry replication to server %d.", rf.me, peer)
+		rf.replicateLog(peer, msg) // retry until it succeeds
+	}
+	log.Printf("Server %d has replicated its logs to server %d.", rf.me, peer)
 }
 
 // the tester doesn't halt goroutines created by Raft after each test,
@@ -451,7 +560,9 @@ func randomRangeTimeout(from int, to int) time.Duration {
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *Persister, applyCh chan ApplyMsg) *Raft {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
-	log.SetOutput(ioutil.Discard)
+	if true {
+		log.SetOutput(io.Discard)
+	}
 	rf := &Raft{}
 	rf.peers = peers
 	rf.persister = persister
@@ -461,6 +572,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.currentLeader = -1 // at this stage, it is unknown
 	rf.votedTerms = make(map[int]string)
 	rf.lastPing = time.Time{}
+	rf.applyCh = applyCh
 
 	log.Printf("Initializing server %d.", rf.me)
 
