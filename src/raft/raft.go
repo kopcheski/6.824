@@ -410,6 +410,8 @@ func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *Ap
 // term. the third return value is true if this server believes it is
 // the leader.
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	index := -1
 	term := rf.currentTerm
 	isLeader := rf.amITheLeader()
@@ -427,7 +429,6 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 
 func (rf *Raft) startAgreement(msg ApplyMsg) {
 	log.Printf("[%d] - starting agreement of index %d.", rf.me, msg.CommandIndex)
-	rf.mu.Lock()
 	cond := sync.NewCond(&rf.mu)
 
 	rf.tempLog = append(rf.tempLog, msg)
@@ -437,6 +438,8 @@ func (rf *Raft) startAgreement(msg ApplyMsg) {
 			continue
 		}
 		go func(peer int) {
+			rf.mu.Lock()
+			defer rf.mu.Unlock()
 			log.Printf("[%d] - replicating command to %d.", rf.me, peer)
 			rf.replicateLog(peer, msg)
 			replicationCount++
@@ -447,7 +450,6 @@ func (rf *Raft) startAgreement(msg ApplyMsg) {
 		cond.Wait()
 	}
 	rf.commitMessages(msg.CommandIndex)
-	rf.mu.Unlock()
 	log.Printf("[%d] - has replicated its logs to most of servers.", rf.me)
 
 	go rf.replicateCommitToPeers(msg.CommandIndex)
