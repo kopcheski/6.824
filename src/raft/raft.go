@@ -207,15 +207,18 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	log.Printf("Server %d will vote for term %d.", rf.me, args.Term)
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	// [ ] it has to implement 5.4.1
-	// it can also be starting an election itself
-	// if rf.votedTerms[args.Term] == "voted" {
-	// 	reply.VoteGranted = false
-	// } else {
-		reply.VoteGranted = args.Term > rf.currentTerm
-		rf.votedTerms[args.Term] = "voted"
-	// }
+	// [x] it has to implement 5.4.1
+	// condition below OR (args.Term == rf.currentTerm AND higher log lenght) 
+	reply.VoteGranted = rf.concedeVote(args)
+	reply.VoteGranted = args.Term > rf.currentTerm
+	rf.votedTerms[args.Term] = "voted"
 	log.Printf("Did server %d voted for server %d? %t.", rf.me, args.CandidateId, reply.VoteGranted)
+}
+
+func (rf *Raft) concedeVote(args *RequestVoteArgs) bool {
+	var forHigherTerm = args.Term > rf.currentTerm
+	var candidateLogUpToDate = args.Term == rf.currentTerm && len(rf.log) <= args.LastLogIndex
+	return forHigherTerm || candidateLogUpToDate
 }
 
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
@@ -341,7 +344,6 @@ func (rf *Raft) claimAuthority() {
 		}
 		time.Sleep(time.Duration(150) * time.Millisecond)
 	}
-	log.Printf("Server %d state is %s", rf.me, rf.currentState)
 }
 
 func (rf *Raft) isMajority(occurrences int) bool {
