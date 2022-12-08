@@ -33,7 +33,7 @@ import (
 	"github.com/sasha-s/go-deadlock"
 )
 
-var logIndex int32
+var retrySleep = time.Duration(50) * time.Millisecond
 
 type ServerState int
 
@@ -91,6 +91,8 @@ type Raft struct {
 	applyCh       chan ApplyMsg
 	log           []ApplyMsg          // the state machine, for commited messages
 	tempLog       []ApplyMsg          // [ ] it is never cleaned up
+	commitIndex   int
+	lastApplied   int
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
@@ -224,18 +226,19 @@ func (rf *Raft) concedeVote(args *RequestVoteArgs) bool {
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	if (0 == len(args.Messages)) {
+	if (0 == len(args.Messages)) { // for voting
 		// has to be in 'candidate' state too? pg6,3rd paragraph)
 		// not a valid term, ignoring invalid leader.
 		rf.voteForElection(args)
 		return
-	} else {
+	} else { // for replication of state
 		for i, _ := range args.Messages {
 			rf.tempLog = append(rf.tempLog, args.Messages[i])
+			rf.lastApplied = args.Messages[i].CommandIndex
 		}
 	}
 
-	if (args.LeaderCommit > 0) {
+	if (args.LeaderCommit > 0) { // for commit
 		rf.commitMessages(args.LeaderCommit)
 	}
 }
@@ -418,10 +421,11 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	term := rf.currentTerm
 	isLeader := rf.amITheLeader()
 	if (isLeader) {
-		index = int(atomic.AddInt32(&logIndex, 1))
+		rf.lastApplied++
 		var msg = ApplyMsg{}
 		msg.Command = command
-		msg.CommandIndex = index
+		msg.CommandIndex = rf.lastApplied
+		index = rf.lastApplied
 		// WHAT GOES HERE? msg.CommandValid
 		rf.startAgreement(msg)
 	}
@@ -478,6 +482,7 @@ func (rf *Raft) replicateCommit(peer int, index int) {
 	var args = &AppendEntriesArgs{}
 	args.LeaderCommit = index
 	if !rf.sendAppendEntries(peer, args, reply) {
+		time.Sleep(retrySleep)
 		log.Printf("Server %d will retry replication of commit to server %d.", rf.me, peer)
 		rf.replicateCommit(peer, index)
 	}
@@ -487,6 +492,7 @@ func (rf *Raft) commitMessages(index int) {
 	for _, v := range rf.tempLog {
 		if v.CommandIndex <= index {
 			rf.log = append(rf.log, v)
+			rf.commitIndex = index
 			v.CommandValid = true
 			rf.applyCh <- v
 		}
@@ -502,10 +508,10 @@ func (rf *Raft) replicateLog(peer int, msg ApplyMsg) {
 	args.Term = rf.currentTerm
 	args.Messages = append(args.Messages, msg)
 	if (!rf.sendAppendEntries(peer, args, reply)) {
-		log.Printf("Server %d will retry replication to server %d.", rf.me, peer)
+		log.Printf("[%d] - will retry replication to server %d.", rf.me, peer)
 		rf.replicateLog(peer, msg) // retry until it succeeds
 	}
-	log.Printf("Server %d has replicated its logs to server %d.", rf.me, peer)
+	log.Printf("[%d] - has replicated its logs to server %d.", rf.me, peer)
 }
 
 // the tester doesn't halt goroutines created by Raft after each test,
@@ -538,6 +544,7 @@ func (rf *Raft) ticker() {
 			rf.fireElection()
 		}
 	}
+	log.Printf("Server %d was killed.", rf.me)
 }
 
 func (rf *Raft) mustStartNewElection(tickerTimeout time.Duration) bool {
