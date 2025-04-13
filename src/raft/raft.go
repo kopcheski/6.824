@@ -43,6 +43,14 @@ const (
 	follower
 )
 
+type Operation int
+
+const (
+	stateReplication Operation = iota
+	commit
+	heartbeat
+)
+
 func (s ServerState) String() string {
 	switch s {
 	case leader:
@@ -65,9 +73,10 @@ func (s ServerState) String() string {
 // snapshots) on the applyCh, but set CommandValid to false for these
 // other uses.
 type ApplyMsg struct {
-	CommandValid bool
-	Command      interface{}
-	CommandIndex int
+	CommandValid  bool
+	Command       interface{}
+	CommandIndex  int
+	PreviousIndex int
 
 	// For 2D:
 	SnapshotValid bool
@@ -93,6 +102,7 @@ type Raft struct {
 	tempLog       []ApplyMsg          // [ ] it is never cleaned up
 	commitIndex   int
 	lastApplied   int
+	prevIndexPerPeer map[int]int
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
@@ -197,6 +207,7 @@ type AppendEntriesArgs struct {
 	Entries      []string
 	LeaderCommit int
 	Messages     []ApplyMsg
+	Operation    Operation
 }
 
 type AppendEntriesReply struct {
@@ -226,21 +237,34 @@ func (rf *Raft) concedeVote(args *RequestVoteArgs) bool {
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	if (0 == len(args.Messages)) { // for voting
+	if (args.Operation == heartbeat) { // for voting
 		// has to be in 'candidate' state too? pg6,3rd paragraph)
 		// not a valid term, ignoring invalid leader.
 		rf.voteForElection(args)
 		return
-	} else { // for replication of state
-		for i, _ := range args.Messages {
+	} else if (args.Operation == stateReplication){ // for replication of state
+		if !rf.consistent(args) {
+			log.Printf("[%d] prev: %d. length: %d.", rf.me, args.PrevLogIndex, len(rf.tempLog))
+			reply.Success = false
+			return
+		}
+		for i := range args.Messages {
 			rf.tempLog = append(rf.tempLog, args.Messages[i])
 			rf.lastApplied = args.Messages[i].CommandIndex
 		}
-	}
-
-	if (args.LeaderCommit > 0) { // for commit
+		reply.Success = true
+	} else if (args.Operation == commit) { // for commit
 		rf.commitMessages(args.LeaderCommit)
 	}
+}
+
+func (rf *Raft) consistent(args *AppendEntriesArgs) bool {
+	var firstMessage = args.PrevLogIndex < 0 && len(rf.tempLog) == 0
+	if firstMessage {
+		return true
+	}
+
+	return args.PrevLogIndex == len(rf.tempLog) - 1
 }
 
 func (rf *Raft) voteForElection(args *AppendEntriesArgs) {
@@ -259,16 +283,16 @@ func (rf *Raft) voteForElection(args *AppendEntriesArgs) {
 }
 
 func (rf *Raft) fireElection() {
+	var votesFor = 1
+	var totalVotesSoFar = 1
+	
+	rf.mu.Lock()
 	log.Printf("Beginning election for term %d. Candidate: Server %d", rf.currentTerm, rf.me)
 	
 	rf.currentTerm += 1
 	rf.currentState = candidate
-
-	var votesFor = 1
-	var totalVotesSoFar = 1
 	rf.votedTerms[rf.currentTerm] = "voted"
 
-	rf.mu.Lock()
 	cond := sync.NewCond(&rf.mu)
 
 	for i := range rf.peers {
@@ -318,6 +342,8 @@ func (rf *Raft) becomeLeader() {
 	rf.mu.Lock()
 	rf.currentState = leader
 	rf.currentLeader = rf.me
+	rf.lastApplied = len(rf.log) - 1;
+	rf.prevIndexPerPeer = make(map[int]int) 
 	rf.mu.Unlock()
 	rf.claimAuthority()
 }
@@ -335,11 +361,14 @@ func (rf *Raft) claimAuthority() {
 				continue
 			}
 			go func(peer int) {
+				rf.mu.Lock()
 				var reply = &AppendEntriesReply{}
 				var args = &AppendEntriesArgs{}
 				args.LeaderId = rf.me
 				args.Term = rf.currentTerm
+				args.Operation = heartbeat
 				log.Printf("Server %d will claim its authority to server %d.", rf.me, peer)
+				rf.mu.Unlock()
 				if (!rf.sendAppendEntries(peer, args, reply)) {
 					log.Printf("[FAILED] Server %d will claim its authority to server %d.", rf.me, peer)
 				}
@@ -398,6 +427,7 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 }
 
 func (rf *Raft) sendAppendEntries(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
+	log.Printf("Args: %v", args)
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
 	return ok
 }
@@ -425,6 +455,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		var msg = ApplyMsg{}
 		msg.Command = command
 		msg.CommandIndex = rf.lastApplied
+		msg.PreviousIndex = msg.CommandIndex - 1
 		index = rf.lastApplied
 		// WHAT GOES HERE? msg.CommandValid
 		rf.startAgreement(msg)
@@ -434,29 +465,27 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 }
 
 func (rf *Raft) startAgreement(msg ApplyMsg) {
-	log.Printf("[%d] - starting agreement of index %d.", rf.me, msg.CommandIndex)
+	log.Printf("msg: %v", msg)
+	log.Printf("[%d] starting agreement of index %d {%v}.", rf.me, msg.CommandIndex, msg.Command)
 	cond := sync.NewCond(&rf.mu)
 
 	rf.tempLog = append(rf.tempLog, msg)
-	var replicationCount = 1
+	var replicationCount = int32(1)
 	for i := range rf.peers {
 		if i == rf.me {
 			continue
 		}
 		go func(peer int) {
-			rf.mu.Lock()
-			defer rf.mu.Unlock()
-			log.Printf("[%d] - replicating command to %d.", rf.me, peer)
 			rf.replicateLog(peer, msg)
-			replicationCount++
+			atomic.StoreInt32(&replicationCount, atomic.LoadInt32(&replicationCount) + 1)
 			cond.Broadcast()
 		}(i)
 	}
-	for !rf.isMajority(replicationCount) {
+	for !rf.isMajority(int(atomic.LoadInt32(&replicationCount))) {
 		cond.Wait()
 	}
 	rf.commitMessages(msg.CommandIndex)
-	log.Printf("[%d] - has replicated its logs to most of servers.", rf.me)
+	log.Printf("[%d] has replicated its logs to most of servers.", rf.me)
 
 	go rf.replicateCommitToPeers(msg.CommandIndex)
 	// [x] how to ask peers to commit?
@@ -469,6 +498,7 @@ func (rf *Raft) startAgreement(msg ApplyMsg) {
 }
 
 func (rf *Raft) replicateCommitToPeers(index int) {
+	log.Printf("[%d] committing index %d.", rf.me, index)
 	for peer := range rf.peers {
 		if peer == rf.me {
 			continue
@@ -481,14 +511,18 @@ func (rf *Raft) replicateCommit(peer int, index int) {
 	var reply = &AppendEntriesReply{}
 	var args = &AppendEntriesArgs{}
 	args.LeaderCommit = index
+	args.Operation = commit
+	log.Printf("[%d] will request [%d] to commit index %d.", rf.me, peer, index)
 	if !rf.sendAppendEntries(peer, args, reply) {
 		time.Sleep(retrySleep)
-		log.Printf("Server %d will retry replication of commit to server %d.", rf.me, peer)
+		log.Printf("[%d] will retry replication of commit to [%d].", rf.me, peer)
 		rf.replicateCommit(peer, index)
 	}
+	log.Printf("[%d] index %d is committed by [%d].", rf.me, index, peer)
 }
 
 func (rf *Raft) commitMessages(index int) {
+	log.Printf("[%d] is committing %d.", rf.me, index)
 	for _, v := range rf.tempLog {
 		if v.CommandIndex <= index {
 			rf.log = append(rf.log, v)
@@ -497,21 +531,55 @@ func (rf *Raft) commitMessages(index int) {
 			rf.applyCh <- v
 		}
 	}
+	log.Printf("[%d] state after commit: %d, %d, %v", rf.me, rf.commitIndex, rf.lastApplied, rf.prevIndexPerPeer)
 }
 
 func (rf *Raft) replicateLog(peer int, msg ApplyMsg) {
 	// [x] AppendEntries to followers
+	rf.mu.Lock()
+	log.Printf("[%d] replicating command to [%d].", rf.me, peer)
 	var reply = &AppendEntriesReply{}
 	var args = &AppendEntriesArgs{}
 	args.LeaderCommit = msg.CommandIndex
 	args.LeaderId = rf.me
 	args.Term = rf.currentTerm
 	args.Messages = append(args.Messages, msg)
-	if (!rf.sendAppendEntries(peer, args, reply)) {
-		log.Printf("[%d] - will retry replication to server %d.", rf.me, peer)
+	args.PrevLogIndex = msg.PreviousIndex
+	args.Operation = stateReplication
+	var replicated = rf.sendAppendEntries(peer, args, reply) 
+	rf.mu.Unlock()
+	if !replicated {
+		time.Sleep(retrySleep)
+		log.Printf("[%d] will retry replication to server %d of index %d.", rf.me, peer, msg.CommandIndex)
 		rf.replicateLog(peer, msg) // retry until it succeeds
+	} 
+
+	if !reply.Success {
+		// HERE!!
+		// it seems like (without certainty) this "inconsistency handling" is buggy.
+		// it may eventually work, but even though I doubt it is reliable.
+		log.Printf("[%d] and [%d] are inconsistent. Decrementing prevLogIndex.", rf.me, peer)
+		
+		rf.adjustPrevIndexPerPeer(peer, msg)     
+		//msg.PreviousIndex = rf.prevIndexPerPeer[peer]
+		time.Sleep(retrySleep)
+		rf.replicateLog(peer, msg)
+		delete(rf.prevIndexPerPeer, peer)
 	}
-	log.Printf("[%d] - has replicated its logs to server %d.", rf.me, peer)
+	log.Printf("[%d] has replicated its logs to server [%d] up to index %d.", rf.me, peer, msg.CommandIndex)
+}
+
+func (rf *Raft) adjustPrevIndexPerPeer(peer int, msg ApplyMsg) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	rf.prevIndexPerPeer[peer] = msg.PreviousIndex - 1
+	if prev, found := rf.prevIndexPerPeer[peer]; found {
+		rf.prevIndexPerPeer[peer] = prev - 1
+	}
+
+	if rf.prevIndexPerPeer[peer] == 0 {
+		log.Printf("[%d] prevLogIndex of [%d] is now == 0.", rf.me, peer)
+	}
 }
 
 // the tester doesn't halt goroutines created by Raft after each test,
@@ -540,7 +608,7 @@ func (rf *Raft) ticker() {
 	for !rf.killed() {
 		time.Sleep(tickerTimeout)
 		if rf.mustStartNewElection(tickerTimeout) {
-			log.Printf("Server: %d. Elapsed %dms since last ping. Timeout: %d.", rf.me, time.Since(rf.lastPing).Milliseconds(), tickerTimeout.Milliseconds())
+			log.Printf("Server %d. Elapsed %dms since last ping. Timeout: %d.", rf.me, time.Since(rf.lastPing).Milliseconds(), tickerTimeout.Milliseconds())
 			rf.fireElection()
 		}
 	}
@@ -571,7 +639,7 @@ func randomRangeTimeout(from int, to int) time.Duration {
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *Persister, applyCh chan ApplyMsg) *Raft {
 	log.SetFlags(log.LstdFlags | log.Lmicroseconds)
-	if true {
+	if false {
 		log.SetOutput(io.Discard)
 	}
 	rf := &Raft{}

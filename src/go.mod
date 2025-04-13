@@ -9,6 +9,7 @@ require (
 	github.com/inconshreveable/mousetrap v1.0.1 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/rivo/uniseg v0.3.4 // indirect
+	github.com/sasha-s/go-deadlock v0.3.1
 	github.com/sirupsen/logrus v1.9.0 // indirect
 	github.com/spf13/cobra v1.5.0 // indirect
 	github.com/stretchr/testify v1.8.0 // indirect
